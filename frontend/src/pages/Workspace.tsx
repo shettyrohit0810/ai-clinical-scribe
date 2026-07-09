@@ -12,6 +12,7 @@ import {
 } from "../api";
 import { useDictation } from "../useDictation";
 import { useVoiceEdit } from "../useVoiceEdit";
+import { wordDiff } from "../diff";
 
 // Debounce delay for the ICD search-as-you-type box — short enough to feel
 // live, long enough that "knee pain" doesn't fire five separate requests.
@@ -82,6 +83,13 @@ export default function Workspace() {
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewingVersion, setViewingVersion] = useState<NoteVersion | null>(null);
   const [viewingError, setViewingError] = useState(false);
+  // Phase 10: version diff. Defaults to comparing against the immediately
+  // preceding version (if one exists) — the comparison a clinician re-
+  // checking "what did I just change" almost always wants first.
+  const [compareVersionNumber, setCompareVersionNumber] = useState<number | null>(null);
+  const [compareVersion, setCompareVersion] = useState<NoteVersion | null>(null);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareError, setCompareError] = useState(false);
 
   const sourceRef = useRef<EventSource | null>(null);
   const loadedRef = useRef(false);
@@ -125,13 +133,39 @@ export default function Workspace() {
     setViewerOpen(true);
     setViewingError(false);
     setViewingVersion(null); // shows a loading state until the fetch resolves
+    setCompareVersion(null);
+    setCompareError(false);
     try {
       const v = await api<NoteVersion>(
         `/api/encounters/${id}/versions/${versionNumber}`,
       );
       setViewingVersion(v);
+      const previousExists = versions.some((s) => s.version_number === versionNumber - 1);
+      if (previousExists) {
+        loadCompareVersion(versionNumber - 1);
+      } else {
+        setCompareVersionNumber(null);
+      }
     } catch {
       setViewingError(true);
+    }
+  }
+
+  async function loadCompareVersion(versionNumber: number | null) {
+    setCompareVersionNumber(versionNumber);
+    setCompareError(false);
+    if (versionNumber === null) {
+      setCompareVersion(null);
+      return;
+    }
+    setCompareLoading(true);
+    try {
+      const v = await api<NoteVersion>(`/api/encounters/${id}/versions/${versionNumber}`);
+      setCompareVersion(v);
+    } catch {
+      setCompareError(true);
+    } finally {
+      setCompareLoading(false);
     }
   }
 
@@ -362,15 +396,15 @@ export default function Workspace() {
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
-          <div className="flex items-center gap-3">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-y-2 px-4 py-3 sm:px-6">
+          <div className="flex flex-wrap items-center gap-3">
             <Link to="/" className="text-xs text-blue-700 hover:underline">
               ← Encounters
             </Link>
             <h1 className="text-sm font-semibold text-slate-900">
               {p.last_name}, {p.first_name}
             </h1>
-            <span className="text-xs text-slate-500">DOB {p.dob}</span>
+            <span className="hidden text-xs text-slate-500 sm:inline">DOB {p.dob}</span>
             <span
               className={
                 detail.status === "saved"
@@ -382,7 +416,7 @@ export default function Workspace() {
               {savedVersion ? ` · v${savedVersion}` : ""}
             </span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             {saveError && (
               <span role="alert" className="text-xs text-red-700">{saveError}</span>
             )}
@@ -589,6 +623,12 @@ export default function Workspace() {
         <VersionViewerModal
           version={viewingVersion}
           error={viewingError}
+          versions={versions}
+          compareVersionNumber={compareVersionNumber}
+          compareVersion={compareVersion}
+          compareLoading={compareLoading}
+          compareError={compareError}
+          onSelectCompare={loadCompareVersion}
           onClose={() => setViewerOpen(false)}
         />
       )}
@@ -621,7 +661,16 @@ function VersionHistoryPanel({
             <tr
               key={v.version_number}
               onClick={() => onView(v.version_number)}
-              className="cursor-pointer border-b border-slate-50 last:border-0 hover:bg-slate-50"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onView(v.version_number);
+                }
+              }}
+              tabIndex={0}
+              role="button"
+              aria-label={`View version ${v.version_number}, saved by ${v.saved_by_name}`}
+              className="cursor-pointer border-b border-slate-50 last:border-0 hover:bg-slate-50 focus:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
             >
               <td className="px-3 py-2 font-mono text-xs text-slate-500">
                 v{v.version_number}
@@ -644,12 +693,34 @@ function VersionHistoryPanel({
 function VersionViewerModal({
   version,
   error,
+  versions,
+  compareVersionNumber,
+  compareVersion,
+  compareLoading,
+  compareError,
+  onSelectCompare,
   onClose,
 }: {
   version: NoteVersion | null;
   error: boolean;
+  versions: NoteVersionSummary[];
+  compareVersionNumber: number | null;
+  compareVersion: NoteVersion | null;
+  compareLoading: boolean;
+  compareError: boolean;
+  onSelectCompare: (versionNumber: number | null) => void;
   onClose: () => void;
 }) {
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  const otherVersions = versions.filter((v) => v.version_number !== version?.version_number);
+
   return (
     <div
       className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 p-6"
@@ -667,6 +738,36 @@ function VersionViewerModal({
             ✕
           </button>
         </div>
+
+        {version && otherVersions.length > 0 && (
+          <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-2">
+            <label className="flex items-center gap-2 text-xs text-slate-500">
+              Compare to
+              <select
+                value={compareVersionNumber ?? ""}
+                onChange={(e) =>
+                  onSelectCompare(e.target.value ? Number(e.target.value) : null)
+                }
+                className="rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:border-blue-600 focus:outline-none"
+              >
+                <option value="">None</option>
+                {otherVersions.map((v) => (
+                  <option key={v.version_number} value={v.version_number}>
+                    v{v.version_number}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {compareLoading && <span className="text-xs text-slate-400">Loading…</span>}
+            {compareVersion && !compareLoading && (
+              <span className="text-xs text-slate-400">
+                additions <ins className="bg-emerald-100 px-0.5 text-emerald-800">green</ins>
+                {" · "}removals <del className="bg-red-100 px-0.5 text-red-700">red</del>
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="space-y-4 p-4">
           {error && (
             <p role="alert" className="text-sm text-red-700">
@@ -676,15 +777,24 @@ function VersionViewerModal({
           {!error && !version && (
             <p className="text-sm text-slate-400">Loading…</p>
           )}
+          {compareError && (
+            <p role="alert" className="text-xs text-red-700">
+              Could not load the comparison version — try a different one.
+            </p>
+          )}
           {version &&
             SECTIONS.map((section) => (
               <div key={section}>
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                   {section}
                 </span>
-                <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
-                  {version[section] || "—"}
-                </p>
+                {compareVersion ? (
+                  <DiffText oldText={compareVersion[section]} newText={version[section]} />
+                ) : (
+                  <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+                    {version[section] || "—"}
+                  </p>
+                )}
               </div>
             ))}
           {version && version.icd_codes.length > 0 && (
@@ -703,6 +813,36 @@ function VersionViewerModal({
         </div>
       </div>
     </div>
+  );
+}
+
+function DiffText({ oldText, newText }: { oldText: string; newText: string }) {
+  if (oldText === newText) {
+    return (
+      <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+        {newText || "—"}
+      </p>
+    );
+  }
+  const tokens = wordDiff(oldText, newText);
+  return (
+    <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+      {tokens.map((t, i) => {
+        if (t.type === "same") return <span key={i}>{t.text}</span>;
+        if (t.type === "added") {
+          return (
+            <ins key={i} className="bg-emerald-100 text-emerald-800">
+              {t.text}
+            </ins>
+          );
+        }
+        return (
+          <del key={i} className="bg-red-100 text-red-700">
+            {t.text}
+          </del>
+        );
+      })}
+    </p>
   );
 }
 
