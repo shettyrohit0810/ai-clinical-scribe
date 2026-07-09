@@ -1,4 +1,7 @@
 # Test-only dependencies (pytest + httpx per the approved testing stack).
 -r requirements.txt
 pytest~=8.3
+# httpx2 is what starlette's TestClient now expects (plain httpx triggers a
+# deprecation warning in the client import path).
 httpx~=0.28
+httpx2
