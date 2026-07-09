@@ -43,6 +43,8 @@ export default function Workspace() {
   const [icdCodes, setIcdCodes] = useState<IcdCode[]>([]);
   const [gen, setGen] = useState<GenState>("idle");
   const [genError, setGenError] = useState("");
+  // Set when the model called fetch_patient_history during this generation.
+  const [historyReferenced, setHistoryReferenced] = useState<number | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("clean");
   const [savedVersion, setSavedVersion] = useState<number | null>(null);
   const [showBanner, setShowBanner] = useState(routeState?.returning ?? false);
@@ -106,10 +108,20 @@ export default function Workspace() {
     await flushAutosave(); // server generates from the freshest transcript
     setNote(EMPTY_NOTE);
     setIcdCodes([]);
+    setHistoryReferenced(null);
     setGen("streaming");
 
     const source = new EventSource(`/api/encounters/${id}/generate`);
     sourceRef.current = source;
+    // Server-side fetch_patient_history tool ran (returning patients only).
+    source.addEventListener("history", (e) => {
+      setHistoryReferenced(JSON.parse((e as MessageEvent).data).prior_encounters);
+    });
+    // Model emitted text before its tool call — restart the panes.
+    source.addEventListener("reset", () => {
+      setNote(EMPTY_NOTE);
+      setIcdCodes([]);
+    });
     source.addEventListener("section", (e) => {
       const { section, delta } = JSON.parse((e as MessageEvent).data);
       setNote((prev) => ({ ...prev, [section]: prev[section as SectionName] + delta }));
@@ -266,6 +278,13 @@ export default function Workspace() {
 
         {/* Right: SOAP panes */}
         <section className="flex flex-col gap-3">
+          {historyReferenced !== null && (
+            <div className="flex items-center gap-2 rounded border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-800">
+              <span aria-hidden>⟲</span>
+              History referenced: {historyReferenced} prior encounter
+              {historyReferenced === 1 ? "" : "s"}
+            </div>
+          )}
           {SECTIONS.map((section) => (
             <SoapPane
               key={section}
