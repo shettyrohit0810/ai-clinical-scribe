@@ -20,6 +20,7 @@ logging.basicConfig(
 )
 
 from app.db import get_db
+from app.routers.admin import router as admin_router
 from app.routers.auth import router as auth_router
 from app.routers.dev import router as dev_router
 from app.routers.encounters import router as encounters_router
@@ -48,6 +49,7 @@ def health(db: Session = Depends(get_db)) -> dict[str, str]:
 
 
 api.include_router(auth_router)
+api.include_router(admin_router)
 api.include_router(encounters_router)
 api.include_router(generation_router)
 api.include_router(icd_router)
