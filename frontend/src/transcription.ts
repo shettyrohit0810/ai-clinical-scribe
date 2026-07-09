@@ -97,6 +97,14 @@ export class WebSpeechTranscriptionProvider implements TranscriptionProvider {
       handlers.onInterim(interim);
     };
     recognition.onerror = (event) => {
+      // "no-speech" is the API's own signal that a recognition round ended
+      // without capturing audio — expected any time the mic goes quiet
+      // (routinely right after stop()/pause() shuts the session down, or
+      // mid-session on a lull), not a failure the clinician needs to see.
+      // onend still fires right after this and drives the actual state
+      // transition (restart if still "listening", otherwise no-op) — so
+      // swallowing this here only skips the error banner, nothing else.
+      if (event.error === "no-speech") return;
       handlers.onError(
         event.error === "not-allowed" || event.error === "permission-denied"
           ? "Microphone access was denied."

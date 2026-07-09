@@ -466,6 +466,28 @@ EC2) before writing any product code.
   and the new dictated text both landed in the transcript in the order
   typed/spoken, and the Stop-triggered sonnet generation correctly
   incorporated both.
+- **Post-ship fix: `no-speech` surfaced as an application error** — Chrome
+  routinely fires a `SpeechRecognition` `error` event with `event.error ===
+  "no-speech"` whenever a recognition round ends without capturing audio,
+  most visibly right after the app itself calls `stop()`/`pause()`. This is
+  the API's own expected terminal signal, not a failure — the spec's own
+  description of the code is "generally not a fatal condition." The
+  original `onerror` handler treated every error identically, so a routine
+  stop would flash a "Dictation error: no-speech" banner at the clinician
+  for no actionable reason. Fixed at the source in `transcription.ts`:
+  `no-speech` now returns early from `onerror` without calling
+  `handlers.onError`, so `useDictation`'s state machine never learns about
+  it as an error (`hadErrorRef` stays false). `onend` still fires right
+  after, exactly as it does for any other session end, and already handles
+  both outcomes correctly: silent auto-restart if the app is still in
+  `"listening"` state (mid-session no-speech), or a clean no-op if the app
+  itself just stopped/paused (state is already `"paused"`/`"idle"` by the
+  time `onend` runs). All other error codes (`not-allowed`,
+  `audio-capture`, `network`, etc.) are unaffected and continue to surface
+  through the existing banner. Verified live with a scripted mock: no-speech
+  fired mid-listening auto-restarts with no banner; no-speech fired right
+  after Stop settles cleanly into idle with no banner; `not-allowed` still
+  shows "Microphone access was denied."
 - **Testing limitation, stated plainly**: this sandboxed environment has no
   real microphone. End-to-end verification used a scripted mock of both
   `window.SpeechRecognition` and `window.webkitSpeechRecognition` (matching
