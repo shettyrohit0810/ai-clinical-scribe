@@ -110,6 +110,18 @@ class NoteVersionOut(BaseModel):
     saved_at: datetime
 
 
+class NoteVersionSummary(BaseModel):
+    """List-view row for the version history panel — no note body, so
+    listing versions never pulls four Text columns per row across the wire."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    version_number: int
+    saved_by: int
+    saved_by_name: str
+    saved_at: datetime
+
+
 class EncounterDetail(EncounterOut):
     template_id: int | None
     draft_note: DraftNote | None

@@ -30,6 +30,8 @@ from app.schemas import (
     EncounterSummary,
     NoteSaveRequest,
     NoteSaveResponse,
+    NoteVersionOut,
+    NoteVersionSummary,
 )
 
 router = APIRouter(prefix="/encounters", tags=["encounters"])
@@ -211,3 +213,53 @@ def save_note(
     return NoteSaveResponse(
         version_number=version.version_number, saved_at=version.saved_at
     )
+
+
+@router.get("/{encounter_id}/versions", response_model=list[NoteVersionSummary])
+def list_versions(
+    encounter_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Version history panel data. Ordered oldest-first (matches the
+    UNIQUE(encounter_id, version_number) btree — see models.py — so this is
+    a single index-ordered scan, no extra index to justify)."""
+    encounter = get_owned_encounter(encounter_id, user, db)
+    rows = db.execute(
+        select(NoteVersion, User.full_name)
+        .join(User, User.id == NoteVersion.saved_by)
+        .where(NoteVersion.encounter_id == encounter.id)
+        .order_by(NoteVersion.version_number)
+    ).all()
+    return [
+        NoteVersionSummary(
+            version_number=v.version_number,
+            saved_by=v.saved_by,
+            saved_by_name=name,
+            saved_at=v.saved_at,
+        )
+        for v, name in rows
+    ]
+
+
+@router.get(
+    "/{encounter_id}/versions/{version_number}", response_model=NoteVersionOut
+)
+def get_version(
+    encounter_id: int,
+    version_number: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """View any single version, read fresh from RDS — the append-only table
+    IS the history store, so there's no separate cache to go stale."""
+    encounter = get_owned_encounter(encounter_id, user, db)
+    version = db.scalar(
+        select(NoteVersion).where(
+            NoteVersion.encounter_id == encounter.id,
+            NoteVersion.version_number == version_number,
+        )
+    )
+    if version is None:
+        raise HTTPException(status_code=404, detail="Version not found")
+    return version
