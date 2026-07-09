@@ -8,6 +8,7 @@ ai-scribe/
 ├── docker-compose.yml        # local dev Postgres (host port 5433)
 ├── ARCHITECTURE.md           # system design — source of truth
 ├── PROJECT_STRUCTURE.md      # this file
+├── API_CONTRACTS.md          # endpoint + SSE event contract (frontend mirrors it)
 ├── DECISIONS.md              # per-phase decision log
 ├── backend/
 │   ├── requirements.txt      # runtime deps (approved stack)
@@ -73,7 +74,7 @@ ai-scribe/
   `models`, `db`. Nothing imports from `routers`.
 - `auth.py` owns every security primitive; routers never touch jwt/bcrypt
   directly.
-- LLM access (Phase 2+) will live in a single client module; routers call it,
-  never the Anthropic SDK directly.
+- LLM access lives in one client module (`llm.py`); routers call it, never
+  the Anthropic SDK directly.
 - Frontend: `pages/*` talk to the backend only through `api.ts`; `auth.tsx`
   is the only holder of session state.
