@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { api, type EncounterSummary } from "../api";
 import { useAuth } from "../auth";
 
@@ -19,6 +20,7 @@ function formatDate(iso: string): string {
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [encounters, setEncounters] = useState<EncounterSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,7 +54,14 @@ export default function Dashboard() {
           <h2 className="text-sm font-semibold text-slate-900">
             {user?.role === "admin" ? "All encounters" : "My encounters"}
           </h2>
-          {/* New-encounter flow arrives in Phase 2 */}
+          {user?.role !== "admin" && (
+            <Link
+              to="/encounters/new"
+              className="rounded bg-blue-700 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-800"
+            >
+              New encounter
+            </Link>
+          )}
         </div>
 
         {error && <p className="mt-4 text-sm text-red-700">{error}</p>}
@@ -83,7 +92,11 @@ export default function Dashboard() {
             </thead>
             <tbody>
               {encounters.map((e) => (
-                <tr key={e.id} className="hover:bg-slate-50">
+                <tr
+                  key={e.id}
+                  onClick={() => navigate(`/encounters/${e.id}`)}
+                  className="cursor-pointer hover:bg-slate-50"
+                >
                   <td className="border-b border-slate-100 px-4 py-2 font-medium text-slate-800">
                     {e.patient.last_name}, {e.patient.first_name}
                   </td>

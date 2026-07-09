@@ -2,6 +2,8 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AuthProvider, RequireAuth } from "./auth";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
+import NewEncounter from "./pages/NewEncounter";
+import Workspace from "./pages/Workspace";
 import StreamTest from "./StreamTest";
 
 export default function App() {
@@ -15,6 +17,22 @@ export default function App() {
             element={
               <RequireAuth>
                 <Dashboard />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/encounters/new"
+            element={
+              <RequireAuth>
+                <NewEncounter />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/encounters/:id"
+            element={
+              <RequireAuth>
+                <Workspace />
               </RequireAuth>
             }
           />

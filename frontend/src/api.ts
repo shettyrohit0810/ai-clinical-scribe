@@ -53,3 +53,47 @@ export interface EncounterSummary {
   created_at: string;
   updated_at: string;
 }
+
+export interface IcdCode {
+  code: string;
+  description: string;
+}
+
+export interface DraftNote {
+  subjective: string;
+  objective: string;
+  assessment: string;
+  plan: string;
+  icd_codes: IcdCode[];
+}
+
+export interface NoteVersion {
+  version_number: number;
+  subjective: string;
+  objective: string;
+  assessment: string;
+  plan: string;
+  icd_codes: IcdCode[];
+  saved_by: number;
+  saved_at: string;
+}
+
+export interface EncounterDetail extends EncounterSummary {
+  transcript: string;
+  template_id: number | null;
+  draft_note: DraftNote | null;
+  latest_version: NoteVersion | null;
+}
+
+export interface EncounterCreated {
+  encounter_id: number;
+  patient: Patient;
+  returning: boolean;
+  prior_encounters: number;
+}
+
+export interface Template {
+  id: number;
+  name: string;
+  description: string;
+}
