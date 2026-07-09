@@ -12,7 +12,7 @@ flowchart LR
     N -->|/api + /ws → 127.0.0.1:8001| A[FastAPI<br/>gunicorn + uvicorn x2]
     A -->|SQLAlchemy pool<br/>10+5, pre-ping| R[(PostgreSQL<br/>RDS, private)]
     A -->|startup, instance role| S[AWS Secrets Manager]
-    A -.->|Phase 2+| L[Anthropic API<br/>haiku: interim drafts<br/>sonnet: final notes]
+    A -.->|Phase 2+| L[Anthropic API<br/>haiku: interim drafts<br/>sonnet: final notes + voice-edit patches]
 ```
 
 - **One deployable unit**: nginx serves the built SPA and proxies `/api`
@@ -127,6 +127,49 @@ flow (Phase 3) all work identically whether a generation was clicked or
 auto-triggered by dictation — there is exactly one generation pipeline in
 this system, not two.
 
+**Conversational voice editing (Phase 8, live)** — a genuinely different
+mode from dictation: not producing a new note, but patching an
+already-generated one by spoken command, over a persistent WebSocket
+(`WS /ws/encounters/{id}/voice-edit`) instead of one-shot SSE. Data flow:
+
+1. **Speech → one command.** The same browser Web Speech API (via a second
+   `TranscriptionProvider`-backed hook, `frontend/src/useVoiceEdit.ts`) runs
+   in "one finalized utterance = one command" mode rather than
+   "append everything to a buffer" mode — each `onFinal` chunk is sent as
+   `{"type": "command", "text": "..."}` over the socket.
+2. **Command → one JSON patch, never a regenerated note.** The server reads
+   the note fresh from `draft_note` (or the latest saved version if no
+   draft exists yet), and makes ONE non-streaming call
+   (`llm.complete_json`, sonnet tier) asking the model for exactly one
+   patch: `add`, `remove`, `rewrite`, or `move`. `remove`/`move` require the
+   model to quote existing section text VERBATIM — the same
+   candidate-constrained shape as ICD selection (Phase 2), applied to text
+   edits instead of codes.
+3. **Patch → mutation, through exactly one function.**
+   `app/note_patch.apply_note_patch` is the only code path allowed to turn
+   a patch into new section content — pure, unit-tested independent of any
+   LLM, and the reason the content-preservation invariant ("every section
+   the patch doesn't name survives byte-identical") is structural rather
+   than something each call site has to remember to uphold.
+4. **Persist + reply.** A successful patch updates `encounter.draft_note`
+   (carrying `icd_codes` through untouched — voice edits never touch them)
+   and writes an audit row, both in the same transaction; the full
+   post-patch note is sent back so the client's state is always a direct
+   copy of server-computed truth, never a client-side reapplication of the
+   patch. `noteDirty` (Phase 7's guard) is set exactly as it would be for a
+   typed pane edit, so a later dictation session's auto-regeneration can't
+   silently overwrite a voice edit either.
+5. **Graceful failure, same connection.** Malformed client messages, LLM
+   failures, non-JSON model output, `{"op": "unclear"}`, and patches that
+   fail `apply_note_patch` validation all reply with `{"type": "error", ...}`
+   and leave the socket open for the next command — nothing is ever
+   partially applied, and one bad command never ends the session.
+
+Dictation and voice-editing are mutually exclusive in the UI (one
+microphone, two incompatible ways of using it) — enforced by disabling each
+mode's Start button while the other is active, not by anything in either
+hook.
+
 ## Component responsibilities
 
 | Component | Owns |
@@ -147,3 +190,7 @@ this system, not two.
   at ~300 rows (pgvector would be premature).
 - Web Speech API is the STT baseline behind a `TranscriptionProvider`
   interface; server-side streaming STT is a stretch behind the same interface.
+- Voice edits are patches, never regenerated notes: one JSON patch per
+  spoken command, applied only through `apply_note_patch` (the single
+  mutation path), with `remove`/`move` requiring the model to quote
+  existing text verbatim rather than describe it.

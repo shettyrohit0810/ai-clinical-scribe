@@ -159,6 +159,65 @@ Exactly one terminal event per stream: `done` or `error`.
 | GET | `/api/health` | `{status, database}` — unauthenticated; used by deploy runbook |
 | GET | `/api/dev/stream-test` | SSE numbers 1–20 @200ms; `event: done` terminator. Infrastructure check (Phase 0 DoD). |
 
+## Voice editing (Phase 8, WebSocket)
+
+`WS /ws/encounters/{encounter_id}/voice-edit`
+
+- **Mounted under `/ws`, not `/api`.** The two live behind separate nginx
+  (and dev Vite proxy) location blocks — `/api` is tuned for SSE
+  (`proxy_buffering off`, no Upgrade headers); `/ws` carries the
+  Upgrade/Connection pair a WebSocket handshake needs. `/ws` was reserved
+  in the nginx config since Phase 0 for exactly this route.
+- **Auth**: same httpOnly session cookie as every other route, read from
+  `websocket.cookies` before `.accept()`. An unauthenticated or
+  cross-provider connection is rejected with `websocket.close(code=4401)`
+  (no session) or `4404` (encounter not found / not owned — same
+  existence-must-not-leak spirit as the REST isolation rule, translated to
+  the nearest WebSocket-native mechanism: closing without detail rather
+  than an HTTP 404 body).
+- **One command in, one patch out.** Every message on the connection is a
+  full round trip — no partial/streaming patches, since a patch is a
+  handful of short JSON fields, not multi-paragraph prose.
+
+Client → server:
+```json
+{"type": "command", "text": "add to the assessment that the patient denies fever"}
+```
+
+Server → client (exactly one reply per command):
+```json
+{"type": "patch_applied", "note": {"subjective": "...", "objective": "...", "assessment": "...", "plan": "..."}, "patch": {"op": "add", "section": "assessment", "text": "..."}, "message": "Added to assessment."}
+{"type": "error", "message": "user-facing text"}
+```
+
+- `note` is the full, authoritative post-patch state of all four SOAP
+  sections — the client replaces its local state with this rather than
+  reapplying the patch itself, so there is exactly one place (the server)
+  that ever computes what a patch does.
+- `message` is a short, server-synthesized confirmation ("Added to
+  assessment.", "Moved to objective.") spoken back via the browser's
+  `speechSynthesis` — never model-authored text, so a TTS confirmation
+  can't itself contain hallucinated content.
+- `error` covers every failure mode on one connection without ever closing
+  it: malformed client JSON, an LLM failure, model output that isn't valid
+  JSON, a command the model couldn't map to an edit (`{"op": "unclear"}`),
+  and a patch that fails validation (unknown op/section, or `remove`/`move`
+  text that isn't an exact match) — each replies with `error` and the loop
+  keeps running, ready for the next command.
+- **`icd_codes` are untouched by every voice-edit patch.** Voice editing is
+  scoped to the four text sections only; the route reads whatever
+  `icd_codes` currently exist (draft or latest saved version) and writes
+  them straight back unchanged alongside the patched sections, so a voice
+  edit can never silently drop the ICD chips.
+- Commands are processed strictly in the order received — the server
+  awaits one full round trip (LLM call → validate → persist → reply)
+  before reading the next message, so a burst of consecutive commands is
+  serialized rather than raced against a shared "current note" read.
+
+See DECISIONS.md Phase 8 for the patch schema, the `apply_note_patch`
+validation rules, and why remove/move require the model to quote existing
+text verbatim.
+
 ## Voice dictation (Phase 7, client-side only)
 
 No new backend endpoints. Dictation reuses `GET /api/encounters/{id}/generate`

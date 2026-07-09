@@ -506,3 +506,159 @@ EC2) before writing any product code.
 No new backend interfaces — see API_CONTRACTS.md "Voice dictation" section
 for the client-side contract (`TranscriptionProvider`, dictation state
 machine, rolling/final trigger conditions).
+
+---
+
+## Phase 8 — Conversational voice editing
+
+**Scope check before starting this phase**: the kickoff instruction referred
+to "the existing WebSocket endpoint" and "keep `apply_note_patch` as the
+single source of truth." Neither existed anywhere in the codebase before
+this phase — confirmed via a graph search and a full-repo grep before
+writing any code. What DID already exist, since Phase 0, was the
+*reservation* for this: `infra/nginx/ai-scribe.conf` has carried a separate
+`/ws/` location block since the very first commit, and `ARCHITECTURE.md`'s
+system diagram has said "`/ws` (voice edit session, Phase 8)" since Phase 0,
+and `llm.py`'s own docstring has said "sonnet for final notes **and
+voice-edit commands**" since Phase 2. So Phase 8 is where that advance
+planning gets built for the first time — not a continuation of code that
+was silently assumed into existence. Noted here so the record is accurate;
+the instruction's intent (reuse the reserved `/ws` path, reuse the existing
+Anthropic client/prompt module, make patch application the one mutation
+path) is exactly what got built.
+
+- **Patch, never regenerate** — the spec's central constraint. Every voice
+  command becomes exactly one small JSON patch (`add`/`remove`/`rewrite`/
+  `move`) via a single non-streaming LLM call, applied by
+  `app/note_patch.apply_note_patch` — the ONLY function in the codebase
+  allowed to mutate note section content from a voice command.
+  `routers/voice_edit.py` never writes model output into the note directly;
+  it always goes through this function, mirroring how `apply_note_patch`'s
+  name itself is meant to read: singular, load-bearing, load-bearing being
+  the whole point.
+- **`remove`/`move` require the model to quote existing text VERBATIM,
+  never describe it** — the same candidate-constrained philosophy as ICD
+  selection (Phase 2: "codes can't be hallucinated because the model
+  chooses only from real rows we retrieved"), applied to text edits: the
+  model can't silently rewrite or shorten content it wasn't asked to touch,
+  because `apply_note_patch` validates the quoted `text` is an exact
+  substring of the current section before removing/moving anything. An
+  inexact quote (paraphrased, summarized, wrong case) fails validation and
+  produces a graceful error instead of a wrong edit. `rewrite` is
+  deliberately the ONLY operation allowed to replace a section wholesale —
+  `add`/`remove`/`move` only ever touch the specific text named in the
+  patch, which is also what makes the content-preservation invariant
+  trivial to guarantee: every section a patch doesn't name is copied
+  verbatim, by construction, not by care taken in each branch.
+- **One-shot, non-streaming completion (`llm.complete_json`), not
+  `stream_completion`** — a patch is a handful of short JSON fields, not a
+  multi-paragraph note; there is nothing to progressively render, so
+  streaming would add protocol complexity (chunk framing, partial-JSON
+  handling) to solve a problem that doesn't exist here. Same client
+  singleton, same never-raises resilience contract (`("ok"|"error", ...)`)
+  as `stream_completion` — one gateway module, two shapes of call for two
+  shapes of output, not two gateways.
+- **Sonnet tier for voice edits, per a decision already on record since
+  Phase 2** — `llm.py`'s docstring has said "sonnet for final notes and
+  voice-edit commands (quality budget)" since it was written. A voice edit
+  is a low-frequency, high-precision action (the clinician is trusting a
+  single round trip to correctly and exactly modify their note) — the
+  opposite risk profile from Phase 7's rolling dictation drafts, where
+  haiku's speed matters more than any single draft being perfect since it
+  gets regenerated every few seconds anyway. Nothing to relitigate;
+  building Phase 8 just cashes in a tier choice made six phases ago.
+- **`{"op": "unclear"}` as the model's own escape hatch** — mirrors
+  `<no_clinical_content/>` from note generation (Phase 2): rather than
+  forcing the model to force-fit every ambiguous utterance ("um, hang on")
+  into one of four operations, the prompt gives it an explicit way to say
+  "this wasn't an edit." Reuses the exact same validation path as any other
+  malformed patch (`"unclear"` is simply not in `VALID_OPS`), except the
+  router intercepts it first to send a friendlier message than the generic
+  "Unrecognized operation" text a truly malformed patch gets.
+- **WebSocket auth is a separate function
+  (`auth.get_current_user_ws`), not a generalization of
+  `get_current_user`** — the two transports fail differently by necessity:
+  an HTTP dependency signals failure by raising `HTTPException`, which
+  FastAPI converts to a response; a WebSocket route has no response object
+  to attach a status to and must explicitly `websocket.close(code=...)`
+  instead. Rather than bend the existing, working HTTP auth dependency to
+  serve two different failure-handling contracts, `get_current_user_ws`
+  duplicates the ~10 lines of token/user-resolution logic and returns
+  `None` on any failure, leaving the close code to the caller. Small,
+  understandable duplication in the same size class as `require_admin`
+  already is, versus a genuinely riskier change to a security-critical
+  function every other route depends on.
+- **draft_note is written per-command, not just left to the existing 3s
+  autosave** — the WebSocket route persists `encounter.draft_note` to the
+  DB on every successful patch (plus an audit row, same
+  `record_audit`-in-the-same-transaction pattern as every other mutation
+  in this codebase). This is the direct backend-side equivalent of the
+  autosave guarantee manually-typed edits already have: a voice-edited
+  draft must survive a refresh or device switch the same way a typed edit
+  does. The frontend's existing debounced autosave effect ALSO fires
+  afterward (it already watches `note` state, which `onPatchApplied`
+  updates) — redundant with the server's own write, but harmless
+  (same field, same eventual value) and consistent with the "belt and
+  suspenders" pattern already used elsewhere (`X-Accel-Buffering` header
+  comment in generation.py).
+- **`icd_codes` are read and written back untouched on every patch** — a
+  voice edit is scoped to the four SOAP text sections; `_current_note` in
+  `voice_edit.py` fetches whatever `icd_codes` currently exist (draft or
+  latest saved version) and re-attaches them to the persisted `draft_note`
+  unchanged. Missing this would have silently emptied the ICD chips the
+  first time a voice edit ran on an encounter that had been saved (no
+  `draft_note` yet) but had ICD codes on its latest version — caught before
+  shipping by a dedicated test (`test_icd_codes_survive_a_voice_edit`), not
+  in production.
+- **`noteDirty` (Phase 7's dirty-edit flag) applies to voice edits too** —
+  `onPatchApplied` in `Workspace.tsx` sets it exactly like a typed pane edit
+  does. This is not a new mechanism: a voice edit is the same class of
+  explicit, must-not-be-silently-overwritten clinician action Phase 7 built
+  the flag to protect — if the clinician voice-edits a note and later
+  starts a NEW dictation session on the same encounter, the existing guard
+  correctly stops that session's auto-regeneration from clobbering the
+  voice-edited content, with zero new code in `useDictation.ts` or
+  `generate()`.
+- **Voice editing and voice dictation are mutually exclusive in the UI,
+  not at the browser-API level** — both modes use the same
+  `WebSpeechTranscriptionProvider`-backed hook shape, but running dictation
+  and voice-editing at once would mean two independent `SpeechRecognition`
+  sessions competing for one microphone, an incoherent state no browser
+  handles gracefully. `Workspace.tsx` disables "Start dictation" while
+  voice-edit is active and disables "Start voice edit" while dictation is
+  active or a generation is streaming — enforced in one place (button
+  `disabled` props), not duplicated into either hook.
+- **TTS interruption fires on `onInterim`, not `onFinal`** — waiting for a
+  full utterance to finish before cancelling a stale confirmation would
+  make the interrupt feel like it lags a beat behind the clinician actually
+  starting to talk. Checking `speechSynthesis.speaking` and cancelling on
+  the FIRST interim result (words still arriving) is what makes "just start
+  talking over it" work the way a person would expect.
+- **Testing limitation, stated plainly**: no real microphone or audio
+  output in this sandboxed environment. End-to-end verification used a
+  scripted mock of `window.SpeechRecognition`/`webkitSpeechRecognition`
+  (same technique as Phase 7) plus a `speechSynthesis` spy (to observe
+  `speak()`/`cancel()` calls without an audio device), driving the REAL
+  backend, the REAL WebSocket connection, and the REAL Anthropic API — not
+  a mocked LLM. Verified live: a spoken "add" command correctly appended a
+  faithfully-transcribed clinical detail to Assessment with the confirmed
+  patch and TTS message; a second, immediately-following "rewrite" command
+  replaced the Plan section while every other pane stayed byte-identical
+  (multiple consecutive commands, processed in order); simulating an
+  active TTS utterance and then emitting new speech correctly triggered
+  `cancel()` (interruption); Stop → Save created a new version (v3)
+  containing both voice edits AND the preserved ICD chip, while v1 and v2
+  remained byte-identical on re-fetch. A real-microphone-and-speaker smoke
+  test is recommended before recording the walkthrough.
+
+### Interfaces established
+
+- `WS /ws/encounters/{encounter_id}/voice-edit` — see API_CONTRACTS.md
+  "Voice editing" for the full message contract.
+- `app.note_patch.apply_note_patch(note, patch)` / `InvalidPatchError` —
+  pure, the single source of truth for note mutations from a patch.
+- `llm.complete_json(model, system, user_prompt, max_tokens)` — one-shot
+  non-streaming completion, second call shape alongside `stream_completion`
+  in the same gateway module.
+- `auth.get_current_user_ws(websocket, db)` — WebSocket auth counterpart to
+  `get_current_user`, returns `None` instead of raising.
