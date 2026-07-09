@@ -1,0 +1,20 @@
+# Local development database only. Credentials here are throwaway dev values
+# that match backend/.env.example; production uses RDS with credentials in
+# AWS Secrets Manager (never in this repo).
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: scribe
+      POSTGRES_PASSWORD: scribe
+      POSTGRES_DB: scribe
+    ports:
+      # Host port 5433: an orphaned container from an earlier attempt
+      # (kyron-scribe-db) still holds 5432 on this machine. Using 5433
+      # sidesteps the collision without touching that container.
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

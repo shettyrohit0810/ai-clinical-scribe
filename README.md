@@ -30,9 +30,10 @@ python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env          # local-only config; git-ignored
 alembic upgrade head
-uvicorn app.main:app --reload --port 8000
+# Port 8001 is this project's port everywhere (dev + prod nginx upstream).
+uvicorn app.main:app --reload --port 8001
 
-# 3. Frontend (separate terminal; dev server proxies /api to :8000)
+# 3. Frontend (separate terminal; dev server proxies /api to :8001)
 cd frontend
 npm install
 npm run dev
