@@ -43,9 +43,19 @@ class Settings(BaseSettings):
 
     app_env: str = "dev"
     database_url: str = "postgresql+psycopg://scribe:scribe@localhost:5433/scribe"
+    # Dev default is intentionally obvious junk; the production guard below
+    # makes it impossible to boot prod without a real secret from Secrets
+    # Manager (forgetting the key fails loudly at startup, not silently).
+    jwt_secret: str = "dev-insecure-jwt-secret-do-not-use-in-prod"
+    jwt_expire_minutes: int = 30
 
 
 @lru_cache
 def get_settings() -> Settings:
     _overlay_aws_secrets()
-    return Settings()
+    settings = Settings()
+    if settings.app_env == "production" and settings.jwt_secret == "dev-insecure-jwt-secret-do-not-use-in-prod":
+        raise RuntimeError(
+            "JWT_SECRET missing from the production secret — refusing to start"
+        )
+    return settings

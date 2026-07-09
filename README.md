@@ -39,8 +39,28 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 — the shell page includes an SSE streaming test
-panel used to verify progressive streaming end-to-end.
+Seed demo data and run tests:
+
+```bash
+cd backend
+.venv/bin/python -m app.seed        # idempotent demo data
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests/   # auth matrix + provider isolation
+```
+
+Open http://localhost:5173 and sign in. `/stream-test` hosts the SSE
+progressive-streaming infrastructure check.
+
+## Seeded logins
+
+All demo accounts use password `ScribeDemo1!` (demo stage props, not secrets):
+
+| Email | Role |
+|---|---|
+| sarah.chen@clinic.example | provider |
+| james.patel@clinic.example | provider |
+| maria.okafor@clinic.example | provider |
+| admin@clinic.example | admin |
 
 ## Deployment
 

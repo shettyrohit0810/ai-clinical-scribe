@@ -10,7 +10,9 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.dev import router as dev_router
+from app.routers.auth import router as auth_router
+from app.routers.dev import router as dev_router
+from app.routers.encounters import router as encounters_router
 
 app = FastAPI(title="AI Clinical Scribe API")
 
@@ -32,5 +34,7 @@ def health(db: Session = Depends(get_db)) -> dict[str, str]:
     return {"status": "ok", "database": database}
 
 
+api.include_router(auth_router)
+api.include_router(encounters_router)
 api.include_router(dev_router)
 app.include_router(api)

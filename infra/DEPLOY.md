@@ -62,9 +62,13 @@ demo in the walkthrough.
 ```json
 {
   "DATABASE_URL": "postgresql+psycopg://scribe_admin:<MASTER_PASSWORD>@<RDS_ENDPOINT>:5432/scribe",
-  "APP_ENV": "production"
+  "APP_ENV": "production",
+  "JWT_SECRET": "<output of: openssl rand -hex 32>"
 }
 ```
+
+The app refuses to start in production if `JWT_SECRET` is missing (guard in
+`backend/app/config.py`) — forgetting it fails loudly at boot, not silently.
 
 2. Secret name: **`ai-scribe/production`** (must match `AWS_SECRET_NAME` in
    the systemd unit). No rotation. Store.
@@ -153,6 +157,10 @@ AWS_SECRET_NAME=ai-scribe/production AWS_DEFAULT_REGION=REGION \
 # Expect: "Running upgrade -> <rev>, baseline (empty)..."
 # This command doubles as proof that the instance role + secret + RDS
 # networking all work before the service ever starts.
+
+# Demo data (idempotent — safe to re-run):
+AWS_SECRET_NAME=ai-scribe/production AWS_DEFAULT_REGION=REGION \
+  .venv/bin/python -m app.seed
 ```
 
 ## 10. systemd service

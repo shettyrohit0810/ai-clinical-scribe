@@ -51,3 +51,39 @@ EC2) before writing any product code.
 ### Deferred (structured TODOs in code)
 
 - Real schema (Phase 1), auth (Phase 1), LLM client module (Phase 2).
+
+---
+
+## Phase 1 — Auth, roles, schema, seeds
+
+- **Full schema in one migration** — all 7 tables landed together even though
+  data arrives per phase: the model was designed up front; later phases add
+  rows, not tables. Index rationale lives inline in `models.py` (verified
+  `(provider_id, created_at DESC)` in pg_indexes).
+- **Auth libraries** — PyJWT + bcrypt (the direct realization of the specced
+  "JWT + bcrypt"; no passlib — unmaintained). All security primitives in
+  `app/auth.py`; routers never touch jwt/bcrypt.
+- **Cookie outlives token** (8h vs 30min) — deliberately, so the server can
+  answer "Session expired" distinctly from "Not authenticated"; that message
+  drives the Phase 9 re-auth-and-retry modal.
+- **is_active checked in DB per request** — deactivation is immediate despite
+  stateless JWTs. Login failures are indistinguishable for unknown email vs
+  wrong password (no account enumeration).
+- **Isolation returns 404, not 403** — a 403 would confirm a foreign
+  encounter id exists; existence itself must not leak.
+- **Prod boot guard** — app refuses to start in production on the dev JWT
+  secret; missing config fails loudly at startup.
+- **Audit rows share the action's transaction** — an action can never commit
+  without its audit entry.
+- **react-router-dom v7 approved and added.** Frontend date-only values (DOB)
+  are formatted without `new Date(iso)` (UTC-midnight off-by-one).
+- **Tests** — dedicated `scribe_test` DB created on demand; DATABASE_URL is
+  overridden before app import so the app's own engine points at it (no
+  dependency-override plumbing). 9 tests green, 0 warnings: auth matrix,
+  expiry, deactivation (both paths), isolation by id and list, admin sees all.
+
+### Interfaces established
+
+- `POST /api/auth/login|logout`, `GET /api/auth/me` (UserOut)
+- `GET /api/encounters` (EncounterSummary[]), `GET /api/encounters/{id}`
+  (EncounterOut) — provider-scoped, admin sees all
