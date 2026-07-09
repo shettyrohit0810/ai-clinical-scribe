@@ -92,15 +92,38 @@ EC2) before writing any product code.
 
 ## Phase 2 — Core scribe workflow
 
-- **Embedding provider (gap-fill, flagged for review)** — the settled design
-  says "JSONB embeddings + Python cosine" but names no embedding vendor, and
-  Anthropic has no embeddings endpoint. Implemented: deterministic local
-  feature-hashed bag-of-words vectors (256 dims, md5 bucketing, L2-norm).
-  ICD descriptions are short literal phrases, so token overlap IS the signal
-  at this scale — "knee pain" retrieves M25.56x correctly (tested). Storage
-  contract (JSONB float arrays + cosine) is exactly as specced; a vendor
-  swap (e.g. Voyage) is one function (`embed_text`) + re-seed. Revisit at
-  Phase 5 if true semantic matching is wanted.
+### Approved design rationales (reviewed and settled with the user)
+
+- **Tagged XML streaming (over JSON output)** — the model emits
+  `<subjective>…</subjective>` etc. rather than a JSON object because the
+  stream must be parsed *incrementally*: a partial opening/closing tag is
+  trivially detectable and cheap to hold back (at most `len(tag)-1` chars),
+  whereas a partially received JSON string is unparseable until the document
+  closes — which would force buffer-then-dump and kill progressive panes.
+  Tags also fail soft: a malformed section damages one pane, not the note.
+  The parser is pure and fuzz-tested char-by-char (test_stream_parser.py).
+- **Retry strategy = SDK-native `max_retries=1`** — the spec's "one retry
+  with backoff on transient failures" is delegated to the Anthropic SDK,
+  which retries connection errors, 408/429 and 5xx with exponential backoff.
+  Hand-rolling retry logic the vendor SDK already implements would add code
+  to defend and subtle bugs to own ("leverage the platform"). Anything that
+  survives the retry becomes one structured `("error", message)` event —
+  callers never see an exception, the UI shows a calm retry state, drafts
+  are untouched.
+- **Local ICD semantic search (APPROVED — keep; no embedding vendor)** —
+  candidate retrieval uses deterministic feature-hashed bag-of-words vectors
+  (256 dims, md5 bucketing, L2-normalized) stored as JSONB float arrays with
+  Python cosine, exactly the settled storage contract. Rationale: Anthropic
+  has no embeddings endpoint; a second vendor means a second API key, spend
+  ceiling, and failure mode; and ICD-10 descriptions are short literal
+  clinical phrases where token overlap IS the semantic signal at ~300 rows
+  ("knee pain" → M25.56x family, covered by tests). Decision per user:
+  do not introduce another embedding provider/vendor unless it becomes
+  necessary later; the swap remains a one-function change (`embed_text`)
+  plus a re-seed.
+
+### Other Phase 2 decisions
+
 - **`encounters.draft_note` JSONB added** — Phase 2's autosave spec requires
   persisting "transcript + unsaved edits", but the settled schema had no home
   for unsaved note text. draft_note is mutable workspace scratch; versions
