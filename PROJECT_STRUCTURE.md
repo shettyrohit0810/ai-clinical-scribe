@@ -29,7 +29,7 @@ ai-scribe/
 │   │   ├── icd.py            # hashed-BoW embed + cosine + rank_candidates
 │   │   ├── history.py        # fetch_patient_history impl (patient-scoped, no args)
 │   │   ├── seed.py           # idempotent demo data (python -m app.seed)
-│   │   ├── seed_icd.py       # 64 real ICD-10 codes, embedded at seed time
+│   │   ├── seed_icd.py       # 289 real ICD-10 codes, embedded at seed time
 │   │   └── routers/
 │   │       ├── auth.py       # /api/auth/{login,logout,me}
 │   │       ├── encounters.py # CRUD+save — provider isolation lives here
@@ -60,7 +60,7 @@ ai-scribe/
 │       │   ├── Login.tsx
 │       │   ├── Dashboard.tsx    # provider's encounter list + New encounter
 │       │   ├── NewEncounter.tsx # identity form, template pick, returning match
-│       │   └── Workspace.tsx    # transcript + streaming SOAP panes + autosave + save + version history
+│       │   └── Workspace.tsx    # transcript + streaming SOAP panes + autosave + save + version history + ICD search widget
 │       └── StreamTest.tsx    # Phase 0 SSE infrastructure check
 └── infra/
     ├── DEPLOY.md             # numbered AWS runbook
