@@ -211,3 +211,38 @@ EC2) before writing any product code.
 - SSE events `history {prior_encounters}` and `reset {}` (API_CONTRACTS.md)
 - `llm.stream_note_generation(model, system, user_prompt, history_provider)`
 - `history.build_history_block(db, encounter)` / `count_prior_saved(db, encounter)`
+
+---
+
+## Phase 4 — Versioning + history UI
+
+- **Summary/detail split for versions** (`NoteVersionSummary` vs
+  `NoteVersionOut`) — the panel lists potentially many versions per
+  encounter; a list response carrying four Text columns per row per version
+  is waste the UI never renders until a row is clicked. `GET .../versions`
+  returns id/name/timestamp only; `GET .../versions/{n}` fetches one full
+  note on demand. No new abstraction — same shape as `EncounterSummary` vs
+  `EncounterDetail` already in the codebase.
+- **`saved_by_name` added via join, not a second round trip** — the panel
+  needs a human name, not a raw user id, so `list_versions` joins `User` in
+  the one query rather than resolving names client-side (would mean either
+  N follow-up requests or shipping the whole user table).
+- **No caching layer for version reads** — every `GET .../versions/{n}` hits
+  Postgres directly. The table is append-only and tiny per encounter (single
+  digits in practice), so a cache would add invalidation complexity to solve
+  a load problem that doesn't exist yet.
+- **Ordering: API returns oldest-first (matches the btree), UI shows
+  newest-first (matches how a clinician re-checks a save)** — the reversal
+  happens client-side in the panel component; the backend index order stays
+  the natural `(encounter_id, version_number)` scan with no ORDER BY
+  DESC index to justify.
+- **The invariant test is exact-value, not just row-count** — beyond
+  asserting two rows exist, it re-reads v1 after v2 is written and asserts
+  every field still equals what was originally posted. Row-count alone
+  can't distinguish append-only from update-in-place; the field-level
+  re-read can.
+
+### Interfaces established
+
+- `GET /api/encounters/{id}/versions` → `NoteVersionSummary[]`
+- `GET /api/encounters/{id}/versions/{version_number}` → `NoteVersionOut`

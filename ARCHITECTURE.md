@@ -55,6 +55,15 @@ empty transcript short-circuits without an LLM call.
 immutable `note_versions` row; versions hang directly off the encounter (no
 separate notes table).
 
+**Version history (Phase 4, live)** — the workspace's version panel lists
+saved versions via `GET /api/encounters/{id}/versions` (summary rows: number,
+saver, timestamp — no note body) and fetches one full version on click via
+`GET /api/encounters/{id}/versions/{n}`, read fresh from RDS every time.
+Nothing is ever updated or deleted in `note_versions`; the append-only
+invariant is enforced by the DB (`UniqueConstraint(encounter_id,
+version_number)`) and proven by an exact-value re-read test, not just a row
+count.
+
 ## Component responsibilities
 
 | Component | Owns |

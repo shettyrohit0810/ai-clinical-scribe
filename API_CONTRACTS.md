@@ -42,6 +42,8 @@ and `GET /api/dev/stream-test` requires an authenticated session:
 | GET | `/api/encounters/{id}` | — → `EncounterDetail{...EncounterSummary, transcript, template_id, draft_note, latest_version}` |
 | PATCH | `/api/encounters/{id}` | **Autosave endpoint** (client debounces ~3s). `{transcript?, template_id?, draft_note?}` — only fields present in the JSON are applied, so partial patches never wipe sibling state. `draft_note = {subjective, objective, assessment, plan, icd_codes[]}`. → `{status, updated_at}` |
 | POST | `/api/encounters/{id}/save` | `{subjective?, objective?, assessment?, plan?, icd_codes?}` → `{version_number, saved_at}`. Append-only: inserts the next `note_versions` row, sets status=saved, clears `draft_note`. |
+| GET | `/api/encounters/{id}/versions` | — → `NoteVersionSummary[]{version_number, saved_by, saved_by_name, saved_at}`, oldest-first. No note body — cheap for the version history panel. |
+| GET | `/api/encounters/{id}/versions/{version_number}` | — → `NoteVersionOut{version_number, subjective, objective, assessment, plan, icd_codes, saved_by, saved_at}`. 404 if the version doesn't exist. Read fresh from RDS every call — the append-only table IS the history store, so there's nothing to invalidate. |
 
 ## Templates
 

@@ -44,7 +44,8 @@ ai-scribe/
 │       ├── test_generation.py      # mocked-LLM SSE: tiers, candidates, errors
 │       ├── test_icd.py             # embedding determinism + relevance
 │       ├── test_history.py         # history block + route tool events + audit
-│       └── test_llm_tool_loop.py   # tool loop vs scripted fake SDK client
+│       ├── test_llm_tool_loop.py   # tool loop vs scripted fake SDK client
+│       └── test_versioning.py      # append-only invariant, list/view, isolation
 ├── frontend/
 │   ├── vite.config.ts        # dev proxy /api → 8001 (mirrors prod nginx)
 │   └── src/
@@ -56,7 +57,7 @@ ai-scribe/
 │       │   ├── Login.tsx
 │       │   ├── Dashboard.tsx    # provider's encounter list + New encounter
 │       │   ├── NewEncounter.tsx # identity form, template pick, returning match
-│       │   └── Workspace.tsx    # transcript + streaming SOAP panes + autosave + save
+│       │   └── Workspace.tsx    # transcript + streaming SOAP panes + autosave + save + version history
 │       └── StreamTest.tsx    # Phase 0 SSE infrastructure check
 └── infra/
     ├── DEPLOY.md             # numbered AWS runbook
