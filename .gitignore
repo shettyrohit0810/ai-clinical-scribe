@@ -1,0 +1,22 @@
+# Secrets — never committed. Production reads from AWS Secrets Manager;
+# local dev uses this git-ignored .env (see backend/.env.example).
+.env
+.env.*
+!.env.example
+*.pem
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Node / frontend build
+node_modules/
+frontend/dist/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
