@@ -120,6 +120,11 @@ class Encounter(Base):
         Enum(EncounterStatus, name="encounter_status"),
         default=EncounterStatus.draft,
     )
+    # Scratch space for UNSAVED note edits ({subjective, objective,
+    # assessment, plan, icd_codes}), autosaved alongside the transcript.
+    # Deliberately separate from note_versions: this column is mutable
+    # workspace state, versions are the immutable record. Cleared on save.
+    draft_note: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
