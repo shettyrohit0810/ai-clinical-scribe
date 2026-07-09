@@ -73,6 +73,8 @@ and `GET /api/dev/stream-test` requires an authenticated session:
 |---|---|---|
 | `section` | `{"section": "subjective"\|"objective"\|"assessment"\|"plan", "delta": "text"}` | Incremental text — append to that pane. Sections may interleave with other events; deltas within a section are ordered. |
 | `icd_codes` | `[{"code": "M17.11", "description": "..."}]` | Complete list, emitted once (buffered server-side; malformed model JSON degrades to `[]`). Codes are always drawn from the backend-supplied candidate list. |
+| `history` | `{"prior_encounters": 3}` | The server-side `fetch_patient_history` tool ran during this generation (returning patients only). Drives the "History referenced: N prior encounters" indicator. Each invocation is also written to `audit_log` (`tool_call:fetch_patient_history`). |
+| `reset` | `{}` | The model emitted note text before its tool call (rare — the prompt says call-first). Client must clear all panes + ICD codes; everything after this event is the authoritative note. |
 | `no_clinical_content` | `{}` | Input had no clinically meaningful content. Nothing generated or saved. Terminal-ish: followed by `done`. |
 | `error` | `{"message": "user-facing text"}` | Vendor/LLM failure after the SDK's one retry. **Terminal — no `done` follows.** Client shows a calm retry state; drafts in the DB are untouched. |
 | `done` | `{}` | Successful end of stream. Client closes the EventSource (otherwise it auto-reconnects and re-generates). |

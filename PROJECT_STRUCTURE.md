@@ -26,6 +26,7 @@ ai-scribe/
 │   │   ├── prompts.py        # all prompts: fixed frame, template framing, ICD candidates
 │   │   ├── stream_parser.py  # pure incremental tagged-section parser (fuzz-tested)
 │   │   ├── icd.py            # hashed-BoW embed + cosine + rank_candidates
+│   │   ├── history.py        # fetch_patient_history impl (patient-scoped, no args)
 │   │   ├── seed.py           # idempotent demo data (python -m app.seed)
 │   │   ├── seed_icd.py       # 64 real ICD-10 codes, embedded at seed time
 │   │   └── routers/
@@ -41,7 +42,9 @@ ai-scribe/
 │       ├── test_stream_parser.py   # char-by-char chunk fuzzing, refusal, bad JSON
 │       ├── test_encounters_flow.py # returning match, autosave, append-only save
 │       ├── test_generation.py      # mocked-LLM SSE: tiers, candidates, errors
-│       └── test_icd.py             # embedding determinism + relevance
+│       ├── test_icd.py             # embedding determinism + relevance
+│       ├── test_history.py         # history block + route tool events + audit
+│       └── test_llm_tool_loop.py   # tool loop vs scripted fake SDK client
 ├── frontend/
 │   ├── vite.config.ts        # dev proxy /api → 8001 (mirrors prod nginx)
 │   └── src/

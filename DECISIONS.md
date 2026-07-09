@@ -156,3 +156,42 @@ EC2) before writing any product code.
   icd_codes / no_clinical_content / error / done
 - `GET /api/templates` → TemplateOut[]
 - `llm.stream_completion(model, system, user_prompt)` → ("delta"|"end"|"error", payload)
+
+---
+
+## Phase 3 — Patient history injection (tool use)
+
+- **Real tool use, not the fallback** — the model calls
+  `fetch_patient_history` mid-generation; the backend executes it and the
+  loop continues (spec's preferred design; the authorized backend-side
+  fallback was not needed — integration took well under the 3h budget).
+- **The tool takes NO arguments** — the backend scopes the query to the
+  encounter's patient. The model cannot name a patient or an id, so there is
+  no path to another patient's history. Containment by construction, not by
+  validation.
+- **Tool offered only to returning patients** — new patients get a plain
+  single-round stream. Cheaper (no tool tokens), simpler, and the
+  returning-vs-new behavioral difference is architectural rather than
+  prompt-dependent.
+- **Optimistic streaming + reset event** — deltas are forwarded live for
+  latency; if the model emits text before its tool call (prompt says
+  call-FIRST, so this is rare), a `reset` SSE event tells the client to
+  clear panes and the server restarts its parser. Covered by unit tests at
+  both the llm-loop and route level.
+- **History = newest 3 SAVED encounters, sections truncated** — drafts have
+  no signed note to reference; truncation keeps history from crowding out
+  the transcript in the token budget.
+- **Every invocation is evidenced twice** — an `audit_log` row
+  (`tool_call:fetch_patient_history`) and an app INFO log line showing
+  round accounting (`stop=tool_use` → executed → `stop=end_turn`).
+- **Verified live**: sonnet called the tool (chip at ~3s); the note cited
+  "up from 3/10 at her last visit" — a figure that exists only in the prior
+  saved note. Haiku (draft tier) also calls the tool, so Phase 7 dictation
+  drafts will be history-aware for free. New patient stream: no history
+  event, no tool round.
+
+### Interfaces established
+
+- SSE events `history {prior_encounters}` and `reset {}` (API_CONTRACTS.md)
+- `llm.stream_note_generation(model, system, user_prompt, history_provider)`
+- `history.build_history_block(db, encounter)` / `count_prior_saved(db, encounter)`
