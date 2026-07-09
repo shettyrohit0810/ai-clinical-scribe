@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # Manager (forgetting the key fails loudly at startup, not silently).
     jwt_secret: str = "dev-insecure-jwt-secret-do-not-use-in-prod"
     jwt_expire_minutes: int = 30
+    # Consumed only by app/llm.py — the single gateway for all LLM traffic.
+    # Empty default keeps tests (mocked LLM) and tooling importable without
+    # a key; a real call without one fails inside llm.py with a structured
+    # error, never a crash.
+    anthropic_api_key: str = ""
 
 
 @lru_cache

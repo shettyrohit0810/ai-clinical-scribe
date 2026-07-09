@@ -12,3 +12,6 @@ boto3~=1.35
 # Auth primitives named in the approved spec (JWT + bcrypt):
 PyJWT~=2.10
 bcrypt~=4.2
+
+# All LLM traffic goes through app/llm.py (single client module, per spec):
+anthropic~=0.116
