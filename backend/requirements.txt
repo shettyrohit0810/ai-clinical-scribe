@@ -9,3 +9,6 @@ psycopg[binary]~=3.2
 pydantic~=2.10
 pydantic-settings~=2.7
 boto3~=1.35
+# Auth primitives named in the approved spec (JWT + bcrypt):
+PyJWT~=2.10
+bcrypt~=4.2

@@ -1,0 +1,4 @@
+# Test-only dependencies (pytest + httpx per the approved testing stack).
+-r requirements.txt
+pytest~=8.3
+httpx~=0.28
