@@ -5,6 +5,8 @@ import {
   type DraftNote,
   type EncounterDetail,
   type IcdCode,
+  type NoteVersion,
+  type NoteVersionSummary,
   type Template,
 } from "../api";
 
@@ -49,8 +51,20 @@ export default function Workspace() {
   const [savedVersion, setSavedVersion] = useState<number | null>(null);
   const [showBanner, setShowBanner] = useState(routeState?.returning ?? false);
 
+  // Version history: summaries for the panel, full content only when viewing.
+  const [versions, setVersions] = useState<NoteVersionSummary[]>([]);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewingVersion, setViewingVersion] = useState<NoteVersion | null>(null);
+  const [viewingError, setViewingError] = useState(false);
+
   const sourceRef = useRef<EventSource | null>(null);
   const loadedRef = useRef(false);
+
+  const refreshVersions = useCallback(() => {
+    api<NoteVersionSummary[]>(`/api/encounters/${id}/versions`)
+      .then(setVersions)
+      .catch(() => {});
+  }, [id]);
 
   // ---- load + hydrate --------------------------------------------------
   useEffect(() => {
@@ -73,8 +87,23 @@ export default function Workspace() {
       if (d.latest_version) setSavedVersion(d.latest_version.version_number);
       loadedRef.current = true;
     });
+    refreshVersions();
     return () => sourceRef.current?.close();
-  }, [id]);
+  }, [id, refreshVersions]);
+
+  async function viewVersion(versionNumber: number) {
+    setViewerOpen(true);
+    setViewingError(false);
+    setViewingVersion(null); // shows a loading state until the fetch resolves
+    try {
+      const v = await api<NoteVersion>(
+        `/api/encounters/${id}/versions/${versionNumber}`,
+      );
+      setViewingVersion(v);
+    } catch {
+      setViewingError(true);
+    }
+  }
 
   // ---- autosave (debounced ~3s) ----------------------------------------
   const flushAutosave = useCallback(async () => {
@@ -161,6 +190,7 @@ export default function Workspace() {
     );
     setSavedVersion(result.version_number);
     setDetail((d) => (d ? { ...d, status: "saved" } : d));
+    refreshVersions();
   }
 
   if (!detail) {
@@ -314,7 +344,130 @@ export default function Workspace() {
             </div>
           )}
         </section>
+
+        {/* Full-width: version history */}
+        <section className="lg:col-span-2">
+          <VersionHistoryPanel versions={versions} onView={viewVersion} />
+        </section>
       </main>
+
+      {viewerOpen && (
+        <VersionViewerModal
+          version={viewingVersion}
+          error={viewingError}
+          onClose={() => setViewerOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function VersionHistoryPanel({
+  versions,
+  onView,
+}: {
+  versions: NoteVersionSummary[];
+  onView: (versionNumber: number) => void;
+}) {
+  if (versions.length === 0) return null;
+  // Newest first for the panel — reading top-to-bottom matches how a
+  // clinician re-checks "what did I just save", even though the backend
+  // returns oldest-first (its natural btree order).
+  const rows = [...versions].reverse();
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white">
+      <div className="border-b border-slate-100 px-3 py-1.5">
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+          Version history
+        </span>
+      </div>
+      <table className="w-full text-sm">
+        <tbody>
+          {rows.map((v) => (
+            <tr
+              key={v.version_number}
+              onClick={() => onView(v.version_number)}
+              className="cursor-pointer border-b border-slate-50 last:border-0 hover:bg-slate-50"
+            >
+              <td className="px-3 py-2 font-mono text-xs text-slate-500">
+                v{v.version_number}
+              </td>
+              <td className="px-3 py-2 text-slate-700">{v.saved_by_name}</td>
+              <td className="px-3 py-2 text-right text-xs text-slate-500">
+                {new Date(v.saved_at).toLocaleString(undefined, {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                })}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function VersionViewerModal({
+  version,
+  error,
+  onClose,
+}: {
+  version: NoteVersion | null;
+  error: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40 p-6"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+          <h2 className="text-sm font-semibold text-slate-900">
+            {version ? `Version ${version.version_number}` : "Version"}
+          </h2>
+          <button onClick={onClose} className="text-sm text-slate-400 hover:text-slate-600">
+            ✕
+          </button>
+        </div>
+        <div className="space-y-4 p-4">
+          {error && (
+            <p role="alert" className="text-sm text-red-700">
+              Could not load this version — try again.
+            </p>
+          )}
+          {!error && !version && (
+            <p className="text-sm text-slate-400">Loading…</p>
+          )}
+          {version &&
+            SECTIONS.map((section) => (
+              <div key={section}>
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {section}
+                </span>
+                <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+                  {version[section] || "—"}
+                </p>
+              </div>
+            ))}
+          {version && version.icd_codes.length > 0 && (
+            <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+              {version.icd_codes.map((c) => (
+                <span
+                  key={c.code}
+                  title={c.description}
+                  className="rounded bg-slate-100 px-2 py-1 font-mono text-xs text-slate-700"
+                >
+                  {c.code}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

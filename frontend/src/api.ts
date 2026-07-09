@@ -78,6 +78,13 @@ export interface NoteVersion {
   saved_at: string;
 }
 
+export interface NoteVersionSummary {
+  version_number: number;
+  saved_by: number;
+  saved_by_name: string;
+  saved_at: string;
+}
+
 export interface EncounterDetail extends EncounterSummary {
   transcript: string;
   template_id: number | null;
