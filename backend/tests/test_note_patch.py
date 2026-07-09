@@ -255,3 +255,109 @@ def test_untouched_sections_always_survive_byte_identical(patch):
     for section in BASE_NOTE:
         if section not in touched:
             assert result[section] == note[section], f"{section} was unexpectedly changed"
+
+
+# ---- Phase 10 additions: repeated text, case, chaining, whitespace --------
+
+
+def test_remove_only_deletes_first_occurrence():
+    # "pain" appears twice; a verbatim single-occurrence removal must not
+    # touch the second one — apply_note_patch never guesses "which pain".
+    note = _note(assessment="Right knee pain. Pain is worse with stairs.")
+    patch = {"op": "remove", "section": "assessment", "text": "pain"}
+    # The lowercase "pain" only appears once (case-sensitive match); the
+    # capitalized "Pain" is untouched by design (see case-sensitivity test).
+    result = apply_note_patch(note, patch)
+    assert result["assessment"] == "Right knee. Pain is worse with stairs."
+
+
+def test_remove_repeated_phrase_only_removes_first_match():
+    note = _note(plan="Follow up. Follow up in six weeks. Follow up as needed.")
+    patch = {"op": "remove", "section": "plan", "text": "Follow up. "}
+    result = apply_note_patch(note, patch)
+    assert result["plan"] == "Follow up in six weeks. Follow up as needed."
+
+
+def test_remove_is_case_sensitive_mismatched_case_fails():
+    # The prompt requires the model to quote VERBATIM, including case; a
+    # near-match that differs only in case must fail exactly like any
+    # other non-exact quote, not be silently accepted.
+    note = _note(assessment="Right knee pain, etiology unclear.")
+    patch = {"op": "remove", "section": "assessment", "text": "ETIOLOGY UNCLEAR"}
+    with pytest.raises(InvalidPatchError):
+        apply_note_patch(note, patch)
+
+
+def test_remove_entire_section_content_leaves_it_empty():
+    note = _note(objective="Mild swelling noted.")
+    patch = {"op": "remove", "section": "objective", "text": "Mild swelling noted."}
+    result = apply_note_patch(note, patch)
+    assert result["objective"] == ""
+
+
+def test_rewrite_strips_leading_and_trailing_whitespace():
+    patch = {"op": "rewrite", "section": "plan", "text": "  Refer to orthopedics.  \n"}
+    result = apply_note_patch(_note(), patch)
+    assert result["plan"] == "Refer to orthopedics."
+
+
+def test_add_strips_whitespace_from_new_text_before_appending():
+    patch = {"op": "add", "section": "assessment", "text": "  Denies fever.  "}
+    result = apply_note_patch(_note(), patch)
+    assert result["assessment"] == "Right knee pain, etiology unclear. Denies fever."
+
+
+def test_unicode_content_round_trips_unchanged():
+    note = _note(objective="Temp 38.5°C, HR 82± regular.")
+    patch = {"op": "add", "section": "assessment", "text": "Fièvre légère."}
+    result = apply_note_patch(note, patch)
+    assert result["objective"] == "Temp 38.5°C, HR 82± regular."
+    assert result["assessment"].endswith("Fièvre légère.")
+
+
+def test_sequential_patches_compose_correctly():
+    # Real usage is exactly this: the server applies one patch per voice
+    # command, feeding each result back in as the next command's input.
+    # This proves apply_note_patch composes across calls, not just once.
+    note = _note()
+    patch1 = {"op": "add", "section": "assessment", "text": "Denies fever."}
+    after1 = apply_note_patch(note, patch1)
+
+    patch2 = {
+        "op": "move",
+        "from_section": "assessment",
+        "to_section": "subjective",
+        "text": "Denies fever.",
+    }
+    after2 = apply_note_patch(after1, patch2)
+
+    patch3 = {"op": "rewrite", "section": "plan", "text": "Refer to orthopedics."}
+    after3 = apply_note_patch(after2, patch3)
+
+    assert after3["assessment"] == "Right knee pain, etiology unclear."
+    assert after3["subjective"] == "Patient reports knee pain for two weeks. Denies fever."
+    assert after3["plan"] == "Refer to orthopedics."
+    # Untouched by any of the three patches.
+    assert after3["objective"] == BASE_NOTE["objective"]
+    # Original input to the whole chain was never mutated.
+    assert note == BASE_NOTE
+
+
+def test_sequential_patches_where_second_depends_on_first():
+    # patch2's "text" only exists in the section AFTER patch1 runs —
+    # proves each step must operate on the PREVIOUS result, not the
+    # original note (a real requirement: the WS route re-reads current
+    # state before every command for exactly this reason).
+    note = _note()
+    patch1 = {"op": "add", "section": "plan", "text": "Order X-ray."}
+    after1 = apply_note_patch(note, patch1)
+    assert "Order X-ray." in after1["plan"]
+
+    patch2 = {"op": "remove", "section": "plan", "text": "Order X-ray."}
+    after2 = apply_note_patch(after1, patch2)
+    assert after2["plan"] == BASE_NOTE["plan"]
+
+    # Applying patch2 directly to the ORIGINAL note (skipping patch1)
+    # correctly fails — the text patch2 targets didn't exist yet there.
+    with pytest.raises(InvalidPatchError):
+        apply_note_patch(note, patch2)
