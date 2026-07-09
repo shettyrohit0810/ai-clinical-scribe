@@ -32,10 +32,11 @@ ai-scribe/
 │   │   ├── seed_icd.py       # 289 real ICD-10 codes, embedded at seed time
 │   │   └── routers/
 │   │       ├── auth.py       # /api/auth/{login,logout,me}
-│   │       ├── encounters.py # CRUD+save — provider isolation lives here
+│   │       ├── admin.py      # /api/admin/* — providers CRUD, template CRUD, audit view
+│   │       ├── encounters.py # CRUD+save — provider isolation + admin filters live here
 │   │       ├── generation.py # /api/encounters/{id}/generate (SSE)
 │   │       ├── icd.py        # /api/icd/search — ICD-10 widget (same rank_candidates as generation)
-│   │       ├── templates.py  # /api/templates (list; admin CRUD in Phase 6)
+│   │       ├── templates.py  # /api/templates (public list: active, no instructions)
 │   │       └── dev.py        # /api/dev/stream-test (SSE smoke route)
 │   └── tests/
 │       ├── conftest.py       # scribe_test DB, per-test truncation, client fixture
@@ -48,19 +49,29 @@ ai-scribe/
 │       ├── test_history.py         # history block + route tool events + audit
 │       ├── test_llm_tool_loop.py   # tool loop vs scripted fake SDK client
 │       ├── test_versioning.py      # append-only invariant, list/view, isolation
-│       └── test_icd_search.py      # search endpoint + 289-code catalog integrity
+│       ├── test_icd_search.py      # search endpoint + 289-code catalog integrity
+│       ├── test_admin_encounters.py # admin filters + isolation-preserved case
+│       ├── test_admin_providers.py  # create/dupe-email/deactivate/audit/403
+│       ├── test_admin_templates.py  # CRUD + read-at-generation freshness test
+│       └── test_admin_audit.py      # ordering, entity display, 403 for non-admin
 ├── frontend/
 │   ├── vite.config.ts        # dev proxy /api → 8001 (mirrors prod nginx)
 │   └── src/
 │       ├── main.tsx          # entry; router lives in App
-│       ├── App.tsx           # routes: /login, / (protected), /stream-test
+│       ├── App.tsx           # routes: /login, / , /encounters/*, /admin, /stream-test
 │       ├── api.ts            # fetch wrapper: JSON, errors → ApiError(status)
-│       ├── auth.tsx          # AuthContext: me/login/logout + RequireAuth
+│       ├── auth.tsx          # AuthContext: me/login/logout + RequireAuth + RequireAdmin
 │       ├── pages/
 │       │   ├── Login.tsx
-│       │   ├── Dashboard.tsx    # provider's encounter list + New encounter
+│       │   ├── Dashboard.tsx    # encounter list + New encounter + Admin dashboard link
 │       │   ├── NewEncounter.tsx # identity form, template pick, returning match
-│       │   └── Workspace.tsx    # transcript + streaming SOAP panes + autosave + save + version history + ICD search widget
+│       │   ├── Workspace.tsx    # transcript + streaming SOAP panes + autosave + save + version history + ICD search widget
+│       │   ├── AdminDashboard.tsx # tab shell: Encounters / Providers / Templates / Audit log
+│       │   └── admin/
+│       │       ├── EncountersTab.tsx  # provider + date-range filters over GET /api/encounters
+│       │       ├── ProvidersTab.tsx   # list + add form + activate/deactivate
+│       │       ├── TemplatesTab.tsx   # list + create/edit modal + activate/deactivate
+│       │       └── AuditTab.tsx       # audit log table
 │       └── StreamTest.tsx    # Phase 0 SSE infrastructure check
 └── infra/
     ├── DEPLOY.md             # numbered AWS runbook

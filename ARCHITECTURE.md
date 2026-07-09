@@ -73,6 +73,28 @@ hashed-BoW-embedding cosine, and clicking a result appends
 idempotent upsert script generation's candidates already relied on — no new
 search infrastructure, no vendor, no vector DB.
 
+**Admin dashboard (Phase 6, live)** — four surfaces under `/admin`
+(`role == admin`, enforced server-side by `require_admin`; the client-side
+`RequireAdmin` route guard is a UX nicety, not the boundary):
+
+- **Encounters** — the SAME `GET /api/encounters` providers use, extended
+  with `provider_id`/`date_from`/`date_to` query params that are only
+  consulted on the admin branch of the existing isolation check. No parallel
+  route, no second ownership rule to maintain.
+- **Providers** — create (reuses `hash_password`/`User` as-is) and
+  activate/deactivate (`PATCH /api/admin/providers/{id}`). Deactivation is
+  effective on that provider's very next request — the same
+  `get_current_user` DB re-check from Phase 1, unmodified.
+- **Templates** — full CRUD (create + partial update; no DELETE, `is_active`
+  is the soft delete so encounters keep a valid FK for history). Editing a
+  template here needs **zero changes** to `generation.py`: the
+  read-at-generation architecture from Phase 2 already reads
+  `instructions` fresh from the DB on every generate call, so an admin edit
+  simply *is* the next generation's input.
+- **Audit log** — `GET /api/admin/audit`, reusing the `audit_log` table and
+  `record_audit` helper from Phase 1; every mutation above writes a row in
+  the same transaction as the action it records.
+
 ## Component responsibilities
 
 | Component | Owns |

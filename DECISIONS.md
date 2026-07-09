@@ -293,3 +293,74 @@ EC2) before writing any product code.
 ### Interfaces established
 
 - `GET /api/icd/search?q=<text>` → `IcdCodeItem[]` (top 5, cosine-ranked)
+
+---
+
+## Phase 6 — Admin dashboard
+
+- **All-encounters filtering extends the existing endpoint — no
+  `/admin/encounters` route** — per explicit instruction to avoid
+  duplicating provider/encounter logic. `provider_id`/`date_from`/`date_to`
+  are query params on the SAME `GET /api/encounters` providers already use.
+  The isolation rule stays exactly where it was (one `if` in
+  `list_encounters`); the admin filters slot into the `elif` branch of that
+  same check rather than a parallel implementation that could drift out of
+  sync or get the ownership rule wrong a second way. Verified explicitly by
+  test: a provider passing another provider's `provider_id` never sees that
+  provider's data — the param is simply inert for them, not "ANDed" (an
+  earlier draft of this test assumed AND semantics and had to be corrected
+  to match the actual, safer `if/elif` behavior).
+- **Provider create/deactivate reuses existing primitives, not new ones** —
+  `POST /api/admin/providers` calls `hash_password` and constructs a `User`
+  row exactly as any other code path would; no parallel password or account
+  logic exists. Email is normalized (`.strip().lower()`) at creation to
+  exactly match what `login()` queries against, so a provider created with
+  a mixed-case email can still log in on the first try.
+- **Deactivate is scoped to `role == provider`, which eliminates admin
+  self-lockout by construction** — an earlier draft added an explicit
+  "cannot deactivate your own account" check; it was dead code, because the
+  route's own `role != provider` guard already 404s an admin's own account
+  before that check could ever run (an admin's row has role=admin, never
+  role=provider, and there is no promotion/demotion endpoint that could
+  change that). Removed the redundant check rather than keep code that
+  implied a code path that could never execute — the scoping rule alone is
+  the correct explanation for why self-lockout can't happen here.
+- **No template DELETE endpoint — `is_active=false` is the soft delete** —
+  `encounters.template_id` is a nullable FK with no cascade; hard-deleting
+  a template referenced by a saved historical encounter would either
+  violate that FK or silently orphan the reference. `is_active` already
+  existed on the model for exactly this reason. Deactivating removes a
+  template from the provider-facing picker and from generation eligibility
+  (`generation.py` already skips inactive templates) without touching any
+  historical data.
+- **Template freshness required ZERO changes to generation.py** — the
+  read-at-generation architecture (Phase 2) already reads
+  `template.instructions` fresh from the DB on every generate call. Admin
+  editing a row in place via `PATCH /api/admin/templates/{id}` is exactly
+  the write side of that existing design. The Phase 6 test
+  (`test_updated_template_takes_effect_on_next_generation_no_refresh`)
+  proves this end-to-end: create a template, generate once, edit the
+  template as admin, generate again on the same encounter in the same
+  session — the second prompt reflects the new instructions and none of
+  the old ones, with no cache to bust anywhere in the path.
+- **Audit log view reuses the existing `audit_log` table and
+  `record_audit` helper** — no new logging mechanism. `GET /api/admin/audit`
+  joins `User` for display names and is backed by the pre-existing
+  `ix_audit_log_created_at` index (declared in Phase 1, unused by any route
+  until now). Every admin mutation in this phase (provider create,
+  activate, deactivate, template create, update) calls `record_audit` in
+  the same request/transaction as the mutation itself, matching the
+  existing atomicity guarantee (`audit.py`: an action can never commit
+  without its audit row).
+- **Client-side `RequireAdmin` is UX only, not the security boundary** —
+  it exists so a provider never sees admin-only UI, but every admin API
+  route enforces `role == admin` server-side via `require_admin`
+  regardless of what the client does or doesn't render.
+
+### Interfaces established
+
+- `GET /api/encounters?provider_id=&date_from=&date_to=` (admin-only
+  filters, extension of the existing route)
+- `GET/POST /api/admin/providers`, `PATCH /api/admin/providers/{id}`
+- `GET/POST /api/admin/templates`, `PATCH /api/admin/templates/{id}`
+- `GET /api/admin/audit?limit=`

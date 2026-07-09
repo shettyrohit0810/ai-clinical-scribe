@@ -37,7 +37,7 @@ and `GET /api/dev/stream-test` requires an authenticated session:
 
 | Method | Path | Body → Response |
 |---|---|---|
-| GET | `/api/encounters` | — → `EncounterSummary[]` (provider-scoped; newest first) |
+| GET | `/api/encounters` | `?provider_id=&date_from=&date_to=` (admin-only filters; **inert for non-admin callers** — see below) → `EncounterSummary[]{..., provider_id, provider_name}` (provider-scoped; newest first) |
 | POST | `/api/encounters` | `{first_name, last_name, dob, template_id?}` → 201 `EncounterCreated{encounter_id, patient, returning, prior_encounters}`. Patient matched case-insensitively on (first, last, dob); created if absent. |
 | GET | `/api/encounters/{id}` | — → `EncounterDetail{...EncounterSummary, transcript, template_id, draft_note, latest_version}` |
 | PATCH | `/api/encounters/{id}` | **Autosave endpoint** (client debounces ~3s). `{transcript?, template_id?, draft_note?}` — only fields present in the JSON are applied, so partial patches never wipe sibling state. `draft_note = {subjective, objective, assessment, plan, icd_codes[]}`. → `{status, updated_at}` |
@@ -45,11 +45,39 @@ and `GET /api/dev/stream-test` requires an authenticated session:
 | GET | `/api/encounters/{id}/versions` | — → `NoteVersionSummary[]{version_number, saved_by, saved_by_name, saved_at}`, oldest-first. No note body — cheap for the version history panel. |
 | GET | `/api/encounters/{id}/versions/{version_number}` | — → `NoteVersionOut{version_number, subjective, objective, assessment, plan, icd_codes, saved_by, saved_at}`. 404 if the version doesn't exist. Read fresh from RDS every call — the append-only table IS the history store, so there's nothing to invalidate. |
 
+**Admin filters on `GET /api/encounters`** — `provider_id`, `date_from`,
+`date_to` (all optional, `YYYY-MM-DD` for dates). These are consulted only
+on the `role == admin` branch of the existing isolation check
+(`if user.role != admin: scope to self` / `elif provider_id: scope to that
+provider`). For a non-admin caller the first branch always matches, so the
+params are simply never read for them — passing another provider's id
+returns your own encounters unchanged, never theirs. This is why the
+dashboard's all-encounters table is an extension of this one endpoint
+rather than a separate `/admin/encounters` route: one ownership check to
+get right, not two.
+
 ## Templates
 
 | Method | Path | Response |
 |---|---|---|
-| GET | `/api/templates` | `TemplateOut[]{id, name, description}` — active templates only. `instructions` are deliberately NOT exposed here (server-side prompt material, read fresh from the DB at generation time). Admin CRUD arrives in Phase 6. |
+| GET | `/api/templates` | `TemplateOut[]{id, name, description}` — active templates only. `instructions` are deliberately NOT exposed here (server-side prompt material, read fresh from the DB at generation time). |
+
+## Admin dashboard
+
+Every route below requires `role == admin` (`require_admin` dependency);
+a provider gets `403 {"detail": "Admin access required"}`. Every mutation
+writes an `audit_log` row via the same `record_audit` helper the rest of
+the app uses.
+
+| Method | Path | Body → Response |
+|---|---|---|
+| GET | `/api/admin/providers` | — → `ProviderOut[]{id, email, full_name, role, is_active, created_at}`, role=provider only, ordered by name. |
+| POST | `/api/admin/providers` | `{email, full_name, password}` → 201 `ProviderOut`. Email normalized (`.strip().lower()`) to match the exact lookup `login()` performs — a mixed-case email at creation can still log in. `400` on a duplicate email (DB UNIQUE constraint, not just app validation). Audit: `provider_create`. |
+| PATCH | `/api/admin/providers/{id}` | `{is_active}` → `ProviderOut`. Scoped to `role == provider` — a target id that isn't a provider (including the admin's own account) 404s; this also rules out admin self-lockout by construction, no separate guard needed. Audit: `provider_activate` \| `provider_deactivate`. Deactivation is effective on the provider's very next request (existing `get_current_user` behavior — see auth.py). |
+| GET | `/api/admin/templates` | — → `TemplateAdminOut[]{id, name, description, instructions, is_active, created_by, created_at, updated_at}` — **all** templates including inactive, **with** `instructions` (the admin editing view; contrast with the public `GET /api/templates`). |
+| POST | `/api/admin/templates` | `{name, description?, instructions}` → 201 `TemplateAdminOut`. Audit: `template_create`. |
+| PATCH | `/api/admin/templates/{id}` | `{name?, description?, instructions?, is_active?}` — only fields present are applied (same `model_fields_set` idiom as `EncounterPatch`). No DELETE endpoint: `is_active=false` is the soft delete. 404 if not found. Audit: `template_update`. |
+| GET | `/api/admin/audit` | `?limit=` (1–200, default 100) → `AuditLogEntryOut[]{id, user_id, user_name, action, entity_type, entity_id, created_at}`, newest first. |
 
 ## ICD-10 search widget
 
