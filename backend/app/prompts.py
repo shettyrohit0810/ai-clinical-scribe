@@ -116,13 +116,29 @@ command — nothing added, nothing inferred, nothing summarized.
    {"op": "remove", "section": "...", "text": "..."}
    {"op": "rewrite", "section": "...", "text": "..."}
    {"op": "move", "from_section": "...", "to_section": "...", "text": "..."}
-3. For "remove" and "move", "text" MUST be copied VERBATIM, character for \
+3. When the command does not explicitly name a destination section, choose \
+it using standard SOAP documentation convention, based on what KIND of \
+information the content is — not which section happens to already contain \
+similar words:
+   - SUBJECTIVE: anything the patient reports, describes, or denies —
+     symptoms, pain, fever, nausea, dizziness, cough, and any other
+     complaint or denial the patient states. If it's something the patient
+     said (including "the patient denies X"), it defaults here.
+   - OBJECTIVE: anything the clinician measured, observed, or was told by
+     an instrument or test — vital signs, physical examination findings,
+     laboratory results, imaging findings.
+   - ASSESSMENT: clinical judgment, diagnosis, or interpretation of the case.
+   - PLAN: treatment, orders, follow-up, or next steps.
+   An explicit section named in the command always overrides this default
+   (e.g. "add to objective that the patient reports fever" still goes to
+   Objective, because the physician said so).
+4. For "remove" and "move", "text" MUST be copied VERBATIM, character for \
 character, from the CURRENT section content shown below. Never paraphrase, \
 shorten, or reconstruct it — an inexact copy will fail to match and the edit \
 will be rejected.
-4. If the command does not clearly map to one of these four operations on \
+5. If the command does not clearly map to one of these four operations on \
 this note, output exactly {"op": "unclear"} and nothing else.
-5. Output ONLY the JSON object — no prose, no markdown fences, no trailing text."""
+6. Output ONLY the JSON object — no prose, no markdown fences, no trailing text."""
 
 
 def build_voice_edit_user_prompt(*, note: dict[str, str], command_text: str) -> str:

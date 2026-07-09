@@ -634,13 +634,36 @@ path) is exactly what got built.
   starting to talk. Checking `speechSynthesis.speaking` and cancelling on
   the FIRST interim result (words still arriving) is what makes "just start
   talking over it" work the way a person would expect.
-- **Testing limitation, stated plainly**: no real microphone or audio
-  output in this sandboxed environment. End-to-end verification used a
-  scripted mock of `window.SpeechRecognition`/`webkitSpeechRecognition`
-  (same technique as Phase 7) plus a `speechSynthesis` spy (to observe
-  `speak()`/`cancel()` calls without an audio device), driving the REAL
-  backend, the REAL WebSocket connection, and the REAL Anthropic API — not
-  a mocked LLM. Verified live: a spoken "add" command correctly appended a
+- **Post-ship fix: section inference for ambiguous commands defaulted to
+  the wrong section** — real-microphone testing (see below) found that
+  "Add that the patient has no fever" was patched into Objective instead
+  of Subjective. Root cause: `VOICE_EDIT_SYSTEM` told the model the four
+  valid section names but gave it no guidance on WHICH one to pick when
+  the command doesn't explicitly name one — plausibly the model was
+  keying off which section already contained the word "fever" (from an
+  earlier test's content) rather than reasoning about what kind of
+  clinical information "no fever" is. Fixed by adding an explicit
+  standard-SOAP-convention rule to the prompt: patient-reported
+  symptoms/complaints/denials (pain, fever, nausea, dizziness, cough, …)
+  default to Subjective; measured/observed findings (vitals, exam
+  findings, labs, imaging) default to Objective; an explicit section named
+  in the command always overrides the default. Deliberately phrased as a
+  general classification rule with illustrative examples, not a special
+  case for "fever" specifically — `apply_note_patch` and `note_patch.py`
+  are untouched; this is a prompt-only fix. Verified live against the REAL
+  Anthropic API (scripted STT input, real model call): "Add that the
+  patient has no fever" now lands in Subjective; a control case ("Add that
+  blood pressure is 120 over 80") still correctly defaults to Objective,
+  confirming the fix didn't overcorrect into always choosing Subjective;
+  an explicit "Add to the plan that …" still honors the named section
+  regardless of content type.
+- **Testing**: this sandboxed environment has no microphone or speaker
+  hardware, so my own end-to-end verification used a scripted mock of
+  `window.SpeechRecognition`/`webkitSpeechRecognition` (same technique as
+  Phase 7) plus a `speechSynthesis` spy (to observe `speak()`/`cancel()`
+  calls without an audio device), driving the REAL backend, the REAL
+  WebSocket connection, and the REAL Anthropic API — not a mocked LLM.
+  Verified live: a spoken "add" command correctly appended a
   faithfully-transcribed clinical detail to Assessment with the confirmed
   patch and TTS message; a second, immediately-following "rewrite" command
   replaced the Plan section while every other pane stayed byte-identical
@@ -648,8 +671,17 @@ path) is exactly what got built.
   active TTS utterance and then emitting new speech correctly triggered
   `cancel()` (interruption); Stop → Save created a new version (v3)
   containing both voice edits AND the preserved ICD chip, while v1 and v2
-  remained byte-identical on re-fetch. A real-microphone-and-speaker smoke
-  test is recommended before recording the walkthrough.
+  remained byte-identical on re-fetch.
+  **The user then performed the real-microphone-and-speaker validation
+  this environment can't**, in Chrome on their own machine against the
+  same running dev servers: add/rewrite/move/remove, ambiguous-command
+  handling, content preservation, version history after edits, transcript
+  editing during dictation, TTS interruption, and save-after-edits all
+  confirmed working — the one gap found (section-inference defaulting to
+  Objective for an unstated-section patient-reported denial) is the prompt
+  fix immediately above, itself re-verified against the real API afterward
+  (three cases: patient-reported → Subjective, measured vital → Objective,
+  explicit section name → always honored).
 
 ### Interfaces established
 
