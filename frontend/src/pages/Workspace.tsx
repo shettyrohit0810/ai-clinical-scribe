@@ -9,6 +9,7 @@ import {
   type NoteVersionSummary,
   type Template,
 } from "../api";
+import { useDictation } from "../useDictation";
 
 // Debounce delay for the ICD search-as-you-type box — short enough to feel
 // live, long enough that "knee pain" doesn't fire five separate requests.
@@ -51,6 +52,17 @@ export default function Workspace() {
   const [genError, setGenError] = useState("");
   // Set when the model called fetch_patient_history during this generation.
   const [historyReferenced, setHistoryReferenced] = useState<number | null>(null);
+  // True whenever the physician has hand-edited a SOAP pane since the last
+  // completed generation. Automatic (dictation-triggered) regenerations
+  // check this and skip themselves rather than overwrite an edit the
+  // physician never asked to have replaced — see generate() below. The
+  // manual "Generate note" button ignores this flag: an explicit click is,
+  // by definition, not an "unexpected" overwrite.
+  const [noteDirty, setNoteDirty] = useState(false);
+  // Distinguishes an auto (dictation) generation from a manual one, purely
+  // for UI messaging — both share the exact same generate() call and SSE
+  // wiring underneath.
+  const [autoGenerating, setAutoGenerating] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("clean");
   const [savedVersion, setSavedVersion] = useState<number | null>(null);
   const [showBanner, setShowBanner] = useState(routeState?.returning ?? false);
@@ -70,6 +82,10 @@ export default function Workspace() {
 
   const sourceRef = useRef<EventSource | null>(null);
   const loadedRef = useRef(false);
+  // Concurrency guard for automatic generations: React state (`gen`) can be
+  // stale inside the dictation timer's closure, so an in-flight flag needs
+  // to live in a ref that's always read synchronously and up to date.
+  const genInFlightRef = useRef(false);
 
   const refreshVersions = useCallback(() => {
     api<NoteVersionSummary[]>(`/api/encounters/${id}/versions`)
@@ -170,54 +186,123 @@ export default function Workspace() {
   }, [transcript, templateId, note, icdCodes, flushAutosave]);
 
   // ---- generation over SSE ---------------------------------------------
-  async function generate() {
-    sourceRef.current?.close();
-    await flushAutosave(); // server generates from the freshest transcript
-    setNote(EMPTY_NOTE);
-    setIcdCodes([]);
-    setHistoryReferenced(null);
-    setGen("streaming");
+  // The SAME endpoint and event wiring serves three callers: the manual
+  // "Generate note" button (tier=final, auto=false — the pre-Phase-7
+  // behavior, unchanged), and dictation's rolling haiku-tier regeneration
+  // and its one final sonnet-tier pass on Stop (both tier/auto set by
+  // useDictation's callbacks below). Phase 7 adds parameters and two
+  // safety guards; it does not add a second SSE implementation.
+  const generate = useCallback(
+    async (opts: { tier?: "final" | "draft"; auto?: boolean } = {}) => {
+      const { tier = "final", auto = false } = opts;
+      if (auto) {
+        // One stream at a time — an automatic trigger that fires while a
+        // previous one is still running just skips; the next timer tick
+        // (or the eventual Stop-dictation final pass) will try again.
+        if (genInFlightRef.current) return;
+        // The core Phase 7 safety rule: a physician's own edit always wins
+        // over an automatic regeneration. Only an explicit button click
+        // may overwrite dirty note state.
+        if (noteDirty) return;
+      }
 
-    const source = new EventSource(`/api/encounters/${id}/generate`);
-    sourceRef.current = source;
-    // Server-side fetch_patient_history tool ran (returning patients only).
-    source.addEventListener("history", (e) => {
-      setHistoryReferenced(JSON.parse((e as MessageEvent).data).prior_encounters);
-    });
-    // Model emitted text before its tool call — restart the panes.
-    source.addEventListener("reset", () => {
-      setNote(EMPTY_NOTE);
-      setIcdCodes([]);
-    });
-    source.addEventListener("section", (e) => {
-      const { section, delta } = JSON.parse((e as MessageEvent).data);
-      setNote((prev) => ({ ...prev, [section]: prev[section as SectionName] + delta }));
-    });
-    source.addEventListener("icd_codes", (e) => {
-      setIcdCodes(JSON.parse((e as MessageEvent).data));
-    });
-    source.addEventListener("no_clinical_content", () => {
-      source.close();
-      setGen("empty");
-    });
-    source.addEventListener("error", (e) => {
-      source.close();
-      const data = (e as MessageEvent).data;
-      setGenError(data ? JSON.parse(data).message : "Connection lost — try again.");
-      setGen("error");
-    });
-    source.addEventListener("done", () => {
-      source.close();
-      setGen("done");
-    });
-    // EventSource network failure (no server event) also lands here:
-    source.onerror = () => {
-      if (source.readyState === EventSource.CLOSED) return;
-      source.close();
-      setGenError("Connection lost — your transcript is safe. Try again.");
-      setGen("error");
-    };
-  }
+      sourceRef.current?.close();
+      await flushAutosave(); // server generates from the freshest transcript
+      genInFlightRef.current = true;
+      setAutoGenerating(auto);
+      setHistoryReferenced(null);
+      setGen("streaming");
+
+      // Deferred clear: panes are NOT blanked until the model actually
+      // starts producing SOAP content. A refusal (<no_clinical_content/>)
+      // or a transient failure therefore leaves whatever was already
+      // showing completely untouched — required for rolling regeneration
+      // to run silently in the background without risking a "the note
+      // just vanished" moment, and a strict improvement over blanking
+      // eagerly for the manual button too.
+      let cleared = false;
+      const ensureCleared = () => {
+        if (cleared) return;
+        cleared = true;
+        setNote(EMPTY_NOTE);
+        setIcdCodes([]);
+      };
+
+      const qs = tier === "draft" ? "?tier=draft" : "";
+      const source = new EventSource(`/api/encounters/${id}/generate${qs}`);
+      sourceRef.current = source;
+      // Server-side fetch_patient_history tool ran (returning patients only).
+      source.addEventListener("history", (e) => {
+        setHistoryReferenced(JSON.parse((e as MessageEvent).data).prior_encounters);
+      });
+      // Model emitted text before its tool call — restart the panes.
+      source.addEventListener("reset", () => {
+        cleared = true;
+        setNote(EMPTY_NOTE);
+        setIcdCodes([]);
+      });
+      source.addEventListener("section", (e) => {
+        ensureCleared();
+        const { section, delta } = JSON.parse((e as MessageEvent).data);
+        setNote((prev) => ({ ...prev, [section]: prev[section as SectionName] + delta }));
+      });
+      source.addEventListener("icd_codes", (e) => {
+        ensureCleared();
+        setIcdCodes(JSON.parse((e as MessageEvent).data));
+      });
+      source.addEventListener("no_clinical_content", () => {
+        source.close();
+        genInFlightRef.current = false;
+        // Auto: nothing was cleared, nothing to explain — stay quiet and
+        // let the next dictation trigger try again. Manual: the physician
+        // asked explicitly and deserves the existing banner.
+        if (!auto) setGen("empty");
+        else setGen("done");
+      });
+      source.addEventListener("error", (e) => {
+        source.close();
+        genInFlightRef.current = false;
+        const data = (e as MessageEvent).data;
+        const message = data ? JSON.parse(data).message : "Connection lost — try again.";
+        if (!auto) {
+          setGenError(message);
+          setGen("error");
+        } else {
+          setGen("done");
+        }
+      });
+      source.addEventListener("done", () => {
+        source.close();
+        genInFlightRef.current = false;
+        setGen("done");
+        // Only clear "dirty" if this stream actually produced fresh
+        // content — a refusal/failure must NOT silently re-arm auto
+        // regeneration to overwrite edits that were never superseded.
+        if (cleared) setNoteDirty(false);
+      });
+      // EventSource network failure (no server event) also lands here:
+      source.onerror = () => {
+        if (source.readyState === EventSource.CLOSED) return;
+        source.close();
+        genInFlightRef.current = false;
+        if (!auto) {
+          setGenError("Connection lost — your transcript is safe. Try again.");
+          setGen("error");
+        } else {
+          setGen("done");
+        }
+      };
+    },
+    [id, noteDirty, flushAutosave],
+  );
+
+  // ---- voice dictation (Web Speech API via TranscriptionProvider) -------
+  const dictation = useDictation({
+    getTranscript: useCallback(() => transcript, [transcript]),
+    onCommitTranscript: useCallback((next: string) => setTranscript(next), []),
+    onRollingRegenerate: useCallback(() => generate({ tier: "draft", auto: true }), [generate]),
+    onFinalRegenerate: useCallback(() => generate({ tier: "final", auto: true }), [generate]),
+  });
 
   // ---- save as version ---------------------------------------------------
   async function saveVersion() {
@@ -315,20 +400,47 @@ export default function Workspace() {
             </select>
           </label>
           <label className="flex min-h-0 flex-1 flex-col">
-            <span className="text-xs font-medium text-slate-600">Encounter transcript</span>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-600">Encounter transcript</span>
+              <DictationControls dictation={dictation} />
+            </div>
             <textarea
-              value={transcript}
+              value={
+                dictation.state === "listening"
+                  ? transcript +
+                    (dictation.interim
+                      ? (transcript && !transcript.endsWith(" ") ? " " : "") + dictation.interim
+                      : "")
+                  : transcript
+              }
               onChange={(e) => setTranscript(e.target.value)}
-              placeholder="Paste or type the encounter transcript…"
-              className="mt-1 min-h-[24rem] flex-1 resize-y rounded border border-slate-300 bg-white p-3 font-mono text-sm leading-relaxed focus:border-blue-600 focus:outline-none"
+              // Read-only only while actively listening: the displayed value
+              // is algorithmically driven by speech events at that point, so
+              // direct typing would race with it. Paused/stopped, the buffer
+              // is a plain editable textarea — this is exactly the window
+              // where "manual edits ... preserved between bursts" happens:
+              // pause, fix a word anywhere in the text, resume, and new
+              // speech appends after your edit untouched.
+              readOnly={dictation.state === "listening"}
+              placeholder="Paste or type the encounter transcript, or start dictation…"
+              className="mt-1 min-h-[24rem] flex-1 resize-y rounded border border-slate-300 bg-white p-3 font-mono text-sm leading-relaxed focus:border-blue-600 focus:outline-none read-only:bg-slate-50"
             />
+            {dictation.error && (
+              <p role="alert" className="mt-1 text-xs text-red-700">{dictation.error}</p>
+            )}
+            {!dictation.supported && (
+              <p className="mt-1 text-xs text-slate-400">
+                Voice dictation isn't supported in this browser — try Chrome or Edge.
+                Typed and pasted transcripts work as usual.
+              </p>
+            )}
           </label>
           <button
-            onClick={generate}
+            onClick={() => generate()}
             disabled={gen === "streaming"}
             className="rounded bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800 disabled:bg-slate-300"
           >
-            {gen === "streaming" ? "Generating…" : "Generate note"}
+            {gen === "streaming" && !autoGenerating ? "Generating…" : "Generate note"}
           </button>
 
           {gen === "empty" && (
@@ -353,13 +465,28 @@ export default function Workspace() {
               {historyReferenced === 1 ? "" : "s"}
             </div>
           )}
+          {gen === "streaming" && autoGenerating && (
+            <div className="flex items-center gap-2 rounded border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-800">
+              <span aria-hidden>●</span>
+              Auto-updating from dictation…
+            </div>
+          )}
+          {noteDirty && dictation.state !== "idle" && (
+            <div className="rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
+              Manual edits present — auto-updates paused until you click
+              "Generate note" again.
+            </div>
+          )}
           {SECTIONS.map((section) => (
             <SoapPane
               key={section}
               name={section}
               value={note[section]}
               streaming={gen === "streaming"}
-              onChange={(v) => setNote((prev) => ({ ...prev, [section]: v }))}
+              onChange={(v) => {
+                setNote((prev) => ({ ...prev, [section]: v }));
+                setNoteDirty(true);
+              }}
             />
           ))}
           {icdCodes.length > 0 && (
@@ -514,6 +641,64 @@ function VersionViewerModal({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function DictationControls({ dictation }: { dictation: ReturnType<typeof useDictation> }) {
+  if (!dictation.supported) return null;
+  return (
+    <div className="flex items-center gap-2">
+      {dictation.state === "idle" && (
+        <button
+          type="button"
+          onClick={dictation.start}
+          className="text-xs font-medium text-blue-700 hover:underline"
+        >
+          ● Start dictation
+        </button>
+      )}
+      {dictation.state === "listening" && (
+        <>
+          <span className="flex items-center gap-1 text-xs font-medium text-red-600">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-red-600" aria-hidden />
+            Listening…
+          </span>
+          <button
+            type="button"
+            onClick={dictation.pause}
+            className="text-xs font-medium text-slate-600 hover:underline"
+          >
+            Pause
+          </button>
+          <button
+            type="button"
+            onClick={dictation.stop}
+            className="text-xs font-medium text-slate-600 hover:underline"
+          >
+            Stop
+          </button>
+        </>
+      )}
+      {dictation.state === "paused" && (
+        <>
+          <span className="text-xs font-medium text-amber-700">Paused</span>
+          <button
+            type="button"
+            onClick={dictation.resume}
+            className="text-xs font-medium text-blue-700 hover:underline"
+          >
+            Resume
+          </button>
+          <button
+            type="button"
+            onClick={dictation.stop}
+            className="text-xs font-medium text-slate-600 hover:underline"
+          >
+            Stop
+          </button>
+        </>
+      )}
     </div>
   );
 }
