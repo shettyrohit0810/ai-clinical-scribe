@@ -64,6 +64,17 @@ invariant is enforced by the DB (`UniqueConstraint(encounter_id,
 version_number)`) and proven by an exact-value re-read test, not just a row
 count.
 
+**Version diff (Phase 10, live)** — layered entirely on top of the above,
+no new backend surface. Opening the version viewer for version N also
+fetches version N-1 (if it exists) through the same
+`GET .../versions/{n}` call, and `frontend/src/diff.ts` — a dependency-free
+word-level LCS diff — renders the two side by side inline per SOAP section
+(additions/removals highlighted). A dropdown lets the clinician compare
+against any other saved version instead of just the immediately preceding
+one. Since both versions are already immutable, already fetched through an
+existing endpoint, and the diff is a pure function of two strings, there
+was nothing for the backend to do here.
+
 **ICD-10 search widget (Phase 5, live)** — `GET /api/icd/search?q=<text>`
 is a second, direct caller of the same `rank_candidates` function generation
 uses internally: provider types a query, gets the top 5 by local

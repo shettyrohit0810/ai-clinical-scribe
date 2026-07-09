@@ -57,8 +57,9 @@ ai-scribe/
 │       ├── test_admin_providers.py  # create/dupe-email/deactivate/audit/403
 │       ├── test_admin_templates.py  # CRUD + read-at-generation freshness test
 │       ├── test_admin_audit.py      # ordering, entity display, 403 for non-admin
-│       ├── test_note_patch.py       # apply_note_patch: 4 ops, malformed patches, content-preservation invariant
-│       └── test_voice_edit.py       # WS route: auth/isolation, patch flow, graceful errors, multi-command ordering
+│       ├── test_note_patch.py       # apply_note_patch: 4 ops, malformed patches, content-preservation invariant, sequential patches (Phase 10)
+│       ├── test_voice_edit.py       # WS route: auth/isolation, patch flow, graceful errors, multi-command ordering
+│       └── test_integration_workflow.py # Phase 10: multi-router end-to-end scenarios (full lifecycle, history+admin, deactivation mid-session)
 ├── frontend/
 │   ├── vite.config.ts        # dev proxy /api → 8001 (mirrors prod nginx), /ws → 8001 with ws:true
 │   └── src/
@@ -70,11 +71,12 @@ ai-scribe/
 │       ├── transcription.ts  # TranscriptionProvider interface + WebSpeechTranscriptionProvider (Web Speech API, client-only, ambient type decls)
 │       ├── useDictation.ts   # dictation state machine: start/pause/resume/stop, interim tracking, rolling-regen trigger timer
 │       ├── useVoiceEdit.ts   # voice-edit state machine: WebSocket + TranscriptionProvider (command mode) + speechSynthesis TTS w/ interruption
+│       ├── diff.ts           # Phase 10: dependency-free word-level LCS diff for the version-compare view
 │       ├── pages/
 │       │   ├── Login.tsx
 │       │   ├── Dashboard.tsx    # encounter list + New encounter + Admin dashboard link
 │       │   ├── NewEncounter.tsx # identity form, template pick, returning match
-│       │   ├── Workspace.tsx    # transcript + streaming SOAP panes + autosave + save + version history + ICD search widget + voice dictation (useDictation) + voice editing (useVoiceEdit), mutually exclusive, sharing one noteDirty guard
+│       │   ├── Workspace.tsx    # transcript + streaming SOAP panes + autosave + save + version history w/ diff view (Phase 10) + ICD search widget + voice dictation (useDictation) + voice editing (useVoiceEdit), mutually exclusive, sharing one noteDirty guard
 │       │   ├── AdminDashboard.tsx # tab shell: Encounters / Providers / Templates / Audit log
 │       │   └── admin/
 │       │       ├── EncountersTab.tsx  # provider + date-range filters over GET /api/encounters

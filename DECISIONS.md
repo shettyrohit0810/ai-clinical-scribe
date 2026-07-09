@@ -790,3 +790,84 @@ contracts instead of the raw error just failing silently or crashing.
 
 None — this phase is entirely frontend consumption of existing backend
 contracts. See API_CONTRACTS.md "Client-side recovery" for the details.
+
+---
+
+## Phase 10 — Test hardening, integration tests, version diff, UI polish
+
+**Scope check before starting** (same discipline as Phases 8/9): the
+kickoff message listed a server-side streaming STT stretch goal alongside
+the required deliverables, but was explicit that it "should not replace or
+delay" them and is only worth attempting "if substantial time remains."
+Given where this project sits against its deadline after nine prior
+phases, the STT stretch was consciously NOT attempted this phase — the
+four required deliverables below are complete and verified; STT remains
+exactly what it already was on record since Phase 7 (a swap point behind
+`TranscriptionProvider`, not started).
+
+- **Voice patch engine test suite: audited the existing Phase 8 suite
+  before writing anything new** — 34 pure `apply_note_patch` tests and 16
+  WS-route tests already existed. Rather than assume nothing was there
+  (duplicating effort) or assume it was complete (skipping real gaps), read
+  both files first and identified concrete, genuine holes: repeated-
+  substring removal (does `remove` correctly touch only the FIRST match,
+  as `_remove_substring`'s `replace(..., 1)` promises?), case-sensitivity
+  of the verbatim-quote requirement, whitespace-stripping on `add`/
+  `rewrite`, removing a section down to empty, unicode content, and —the
+  most valuable addition — sequential patches, where one patch's result
+  feeds the next patch's input. That last one matters because it's exactly
+  how the WS route behaves in production (one command, one patch, applied
+  to whatever the PREVIOUS command left behind) but wasn't covered at the
+  fast, LLM-free pure-function level; only the slower WS-mocked layer
+  exercised anything like it. 9 new tests added, all passing alongside the
+  original 34.
+- **Backend integration tests are a new file
+  (`test_integration_workflow.py`), not more of the same** — every existing
+  test file (by design, since Phase 1) exercises one router/feature in
+  relative isolation. That's the right shape for fast, precise failure
+  localization, but it means nothing had ever proven the pieces compose:
+  that a note generated in one call can be voice-edited in a second, saved
+  in a third, and read back correctly in a fourth; that a returning
+  patient's history tool call is both audited AND visible to nothing else
+  breaking; that an admin's mid-session deactivation of a provider actually
+  403s that provider's NEXT call (not just blocks a fresh login, which
+  `test_admin_providers.py` already covered) while leaving their draft
+  exactly where they left it. Three scenarios, each crossing 3-5 routers
+  in one test, same LLM-mocked/real-DB/real-TestClient approach as every
+  other suite.
+- **Version diff is entirely client-side — no new backend endpoint** —
+  both versions being compared are already available through the existing
+  `GET /api/encounters/{id}/versions/{n}`; a diff is a pure function of
+  two strings the browser already has fetched, not something the backend
+  needs to compute or the append-only `note_versions` table needs a new
+  read path for. Word-level LCS (`frontend/src/diff.ts`, ~50 lines) rather
+  than a diff library: clinical note sections are a few sentences, far too
+  small to justify a dependency, and the "ask before adding a dependency"
+  rule from the kickoff prompt has held for nine phases — this was a
+  chance to hold it by writing 50 lines instead of asking to break it.
+  Word-level (not character-level): a character diff on prose produces
+  noisy, hard-to-read sub-word fragments on what are usually whole-phrase
+  edits; word-level matches how a clinician actually thinks about "what
+  changed." Defaults to comparing against the immediately preceding
+  version — the comparison that answers "what did I just change" without
+  any clicks — with a dropdown to pick any other saved version instead.
+- **UI polish: two concrete, bounded fixes, not an open-ended pass** —
+  (1) version-history rows were `onClick`-only `<tr>` elements with no
+  keyboard path to them at all; added `tabIndex`, `role="button"`,
+  `aria-label`, and Enter/Space handling. (2) the version viewer modal had
+  no Escape-to-close, a near-universal modal convention; added a
+  window-level keydown listener scoped to the modal's own mount lifetime.
+  Found by deliberately checking, not by guessing: a mobile-width
+  (375px) screenshot of the workspace header showed the "Save note" button
+  genuinely clipped off the right edge of the viewport (`flex
+  justify-between` with no wrap point and no width slack at small sizes).
+  Fixed with `flex-wrap` on the header and its two inner groups, tighter
+  mobile padding, and hiding the DOB line below the `sm` breakpoint (the
+  least load-bearing piece of header text, freeing width for the
+  status badge and Save button that always matter). Verified at both
+  375px and desktop width post-fix — no clipping, no desktop regression.
+
+### Interfaces established
+
+- `frontend/src/diff.ts` — `wordDiff(oldText, newText): DiffToken[]`, pure,
+  no backend or dependency involvement.

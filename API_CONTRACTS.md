@@ -86,6 +86,14 @@ dashboard's all-encounters table is an extension of this one endpoint
 rather than a separate `/admin/encounters` route: one ownership check to
 get right, not two.
 
+**Version diff (Phase 10, client-side only)** — no new endpoint. The
+version viewer modal fetches a second version through the SAME
+`GET .../versions/{n}` above and diffs it against the one being viewed
+entirely in the browser (`frontend/src/diff.ts`, a dependency-free
+word-level LCS diff — see DECISIONS.md for why no library was added).
+Defaults to comparing against the immediately preceding version number
+when one exists; the clinician can pick any other saved version instead.
+
 ## Templates
 
 | Method | Path | Response |
