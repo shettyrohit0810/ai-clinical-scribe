@@ -1,9 +1,10 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
-import { AuthProvider, RequireAuth } from "./auth";
+import { AuthProvider, RequireAdmin, RequireAuth } from "./auth";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import NewEncounter from "./pages/NewEncounter";
 import Workspace from "./pages/Workspace";
+import AdminDashboard from "./pages/AdminDashboard";
 import StreamTest from "./StreamTest";
 
 export default function App() {
@@ -34,6 +35,14 @@ export default function App() {
               <RequireAuth>
                 <Workspace />
               </RequireAuth>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <RequireAdmin>
+                <AdminDashboard />
+              </RequireAdmin>
             }
           />
           {/* Phase 0 SSE infrastructure check — kept as a standalone route so

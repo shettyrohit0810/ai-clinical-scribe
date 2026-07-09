@@ -38,6 +38,11 @@ export default function Dashboard() {
             AI Clinical Scribe
           </h1>
           <div className="flex items-center gap-4">
+            {user?.role === "admin" && (
+              <Link to="/admin" className="text-sm font-medium text-blue-700 hover:underline">
+                Admin dashboard
+              </Link>
+            )}
             <span className="text-sm text-slate-600">{user?.full_name}</span>
             <button
               onClick={logout}

@@ -52,6 +52,8 @@ export interface EncounterSummary {
   status: "draft" | "saved";
   created_at: string;
   updated_at: string;
+  provider_id: number;
+  provider_name: string;
 }
 
 export interface IcdCode {
@@ -103,4 +105,36 @@ export interface Template {
   id: number;
   name: string;
   description: string;
+}
+
+// ---- Phase 6: admin dashboard ----
+
+export interface Provider {
+  id: number;
+  email: string;
+  full_name: string;
+  role: "provider" | "admin";
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface TemplateAdmin {
+  id: number;
+  name: string;
+  description: string;
+  instructions: string;
+  is_active: boolean;
+  created_by: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AuditLogEntry {
+  id: number;
+  user_id: number;
+  user_name: string;
+  action: string;
+  entity_type: string | null;
+  entity_id: number | null;
+  created_at: string;
 }

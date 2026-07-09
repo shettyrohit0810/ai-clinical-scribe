@@ -72,3 +72,21 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   if (!user) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
+
+// Client-side gate only — a UX nicety, not the security boundary. Every
+// admin endpoint enforces role=admin server-side via require_admin
+// (app/auth.py); a provider hitting /admin directly just bounces to "/",
+// and any API call they made from there would 403 regardless.
+export function RequireAdmin({ children }: { children: ReactNode }) {
+  const { user, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-sm text-slate-400">
+        Loading…
+      </div>
+    );
+  }
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role !== "admin") return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
