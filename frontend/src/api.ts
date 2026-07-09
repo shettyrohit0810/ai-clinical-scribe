@@ -3,6 +3,8 @@
 // and in prod via nginx), so there is no token-handling code in the client
 // at all: the httpOnly cookie is invisible to JS by design.
 
+import { notifyDeactivated, requestReauth } from "./sessionExpiry";
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -12,22 +14,54 @@ export class ApiError extends Error {
   }
 }
 
+async function readErrorDetail(res: Response): Promise<string> {
+  let detail = res.statusText;
+  try {
+    const body = await res.json();
+    if (typeof body.detail === "string") detail = body.detail;
+  } catch {
+    // non-JSON error body — keep statusText
+  }
+  return detail;
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     headers: { "Content-Type": "application/json" },
     ...init,
   });
-  if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const body = await res.json();
-      if (typeof body.detail === "string") detail = body.detail;
-    } catch {
-      // non-JSON error body — keep statusText
-    }
-    throw new ApiError(res.status, detail);
+
+  if (res.ok) return res.json();
+
+  const detail = await readErrorDetail(res);
+
+  // "Session expired" (token past its 30-min expiry, cookie still valid —
+  // see auth.py) is recoverable without losing whatever this call was
+  // trying to do: pause here for a successful re-login, then replay the
+  // EXACT same request once. Every caller of api() gets this for free —
+  // flushAutosave, saveVersion, admin actions, all of it — with zero
+  // caller-side retry logic, because the recovery lives in the one place
+  // every request already passes through.
+  if (res.status === 401 && detail === "Session expired") {
+    await requestReauth();
+    const retry = await fetch(path, {
+      headers: { "Content-Type": "application/json" },
+      ...init,
+    });
+    if (retry.ok) return retry.json();
+    throw new ApiError(retry.status, await readErrorDetail(retry));
   }
-  return res.json();
+
+  // Deactivation (403 "Account deactivated") is NOT recoverable by
+  // retrying or re-authenticating — the account itself is blocked, so
+  // every subsequent call would 403 again regardless. Flag it globally
+  // once; the app renders a full-screen "your draft is preserved" notice
+  // instead of trying to keep the workspace usable.
+  if (res.status === 403 && detail === "Account deactivated") {
+    notifyDeactivated();
+  }
+
+  throw new ApiError(res.status, detail);
 }
 
 // ---- API types (mirror backend/app/schemas.py) ----

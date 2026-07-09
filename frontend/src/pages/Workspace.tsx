@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import {
+  ApiError,
   api,
   type DraftNote,
   type EncounterDetail,
@@ -66,6 +67,7 @@ export default function Workspace() {
   const [autoGenerating, setAutoGenerating] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("clean");
   const [savedVersion, setSavedVersion] = useState<number | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [showBanner, setShowBanner] = useState(routeState?.returning ?? false);
 
   // ICD-10 search widget — separate from `icdCodes` (the model-selected,
@@ -321,15 +323,27 @@ export default function Workspace() {
   });
 
   // ---- save as version ---------------------------------------------------
+  // Errors are caught (not left to reject silently) because api() may now
+  // pause here for a session-expiry re-login (Phase 9) — if that flow is
+  // cancelled, or a genuinely different failure happens, the physician
+  // needs to see it rather than watch "Save note" do nothing. Nothing in
+  // this function needs to know about re-auth: api() already retried the
+  // exact same request transparently before this catch could ever see the
+  // session-expiry case at all.
   async function saveVersion() {
-    await flushAutosave();
-    const result = await api<{ version_number: number }>(
-      `/api/encounters/${id}/save`,
-      { method: "POST", body: JSON.stringify({ ...note, icd_codes: icdCodes }) },
-    );
-    setSavedVersion(result.version_number);
-    setDetail((d) => (d ? { ...d, status: "saved" } : d));
-    refreshVersions();
+    setSaveError(null);
+    try {
+      await flushAutosave();
+      const result = await api<{ version_number: number }>(
+        `/api/encounters/${id}/save`,
+        { method: "POST", body: JSON.stringify({ ...note, icd_codes: icdCodes }) },
+      );
+      setSavedVersion(result.version_number);
+      setDetail((d) => (d ? { ...d, status: "saved" } : d));
+      refreshVersions();
+    } catch (err) {
+      setSaveError(err instanceof ApiError ? err.message : "Could not save — try again.");
+    }
   }
 
   if (!detail) {
@@ -369,6 +383,9 @@ export default function Workspace() {
             </span>
           </div>
           <div className="flex items-center gap-3">
+            {saveError && (
+              <span role="alert" className="text-xs text-red-700">{saveError}</span>
+            )}
             <span className="text-xs text-slate-400">
               {saveState === "saving" && "Saving…"}
               {saveState === "saved" && "All changes saved"}
