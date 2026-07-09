@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
-from fastapi import Depends, HTTPException, Request, Response
+from fastapi import Depends, HTTPException, Request, Response, WebSocket
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -93,6 +93,32 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
         # Fresh DB check on every request: deactivation is immediate even
         # though the JWT itself is still cryptographically valid.
         raise HTTPException(status_code=403, detail="Account deactivated")
+    return user
+
+
+def get_current_user_ws(websocket: WebSocket, db: Session) -> User | None:
+    """WebSocket counterpart to get_current_user (Phase 8: voice edit).
+
+    A separate function rather than a shared generalization of
+    get_current_user: the two transports fail differently on purpose. An
+    HTTP request signals an auth failure by raising HTTPException, which
+    FastAPI turns into a 401/403 response. A WebSocket route must instead
+    explicitly `await websocket.close(code=...)` — there is no response
+    object to attach a status to — so this returns None on any failure and
+    lets the caller decide the close code, rather than raising.
+    """
+    token = websocket.cookies.get(ACCESS_TOKEN_COOKIE)
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(
+            token, get_settings().jwt_secret, algorithms=[JWT_ALGORITHM]
+        )
+    except jwt.InvalidTokenError:
+        return None
+    user = db.get(User, int(payload["sub"]))
+    if user is None or not user.is_active:
+        return None
     return user
 
 

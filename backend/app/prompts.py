@@ -89,3 +89,48 @@ def build_note_user_prompt(
     parts.append('ENCOUNTER TRANSCRIPT:\n"""\n' + transcript + '\n"""')
 
     return "\n\n".join(parts)
+
+
+# ---- Phase 8: conversational voice editing -----------------------------------
+#
+# One spoken command in, one JSON patch out — never a regenerated note. The
+# same candidate-constrained philosophy as ICD selection applies here: for
+# "remove"/"move", the model must quote EXISTING note text verbatim rather
+# than describe or paraphrase it, so app/note_patch.py can validate the
+# quote against the real section content before anything is mutated. There
+# is no path for the model to silently invent or rewrite content it wasn't
+# asked to touch — apply_note_patch enforces that, not this prompt; the
+# prompt is just what asks nicely for well-formed input.
+
+VOICE_EDIT_SYSTEM = """You are a clinical note editing assistant. You receive \
+the CURRENT content of a SOAP note and ONE spoken edit command from the \
+physician who dictated it. Translate the command into exactly one JSON patch \
+and output NOTHING else — no markdown, no explanation, no code fences.
+
+Non-negotiable rules:
+1. Never invent clinical content. Any new text in an "add" or "rewrite" \
+operation must be a faithful transcription of what the physician said in the \
+command — nothing added, nothing inferred, nothing summarized.
+2. Output exactly one JSON object in exactly one of these four shapes:
+   {"op": "add", "section": "subjective"|"objective"|"assessment"|"plan", "text": "..."}
+   {"op": "remove", "section": "...", "text": "..."}
+   {"op": "rewrite", "section": "...", "text": "..."}
+   {"op": "move", "from_section": "...", "to_section": "...", "text": "..."}
+3. For "remove" and "move", "text" MUST be copied VERBATIM, character for \
+character, from the CURRENT section content shown below. Never paraphrase, \
+shorten, or reconstruct it — an inexact copy will fail to match and the edit \
+will be rejected.
+4. If the command does not clearly map to one of these four operations on \
+this note, output exactly {"op": "unclear"} and nothing else.
+5. Output ONLY the JSON object — no prose, no markdown fences, no trailing text."""
+
+
+def build_voice_edit_user_prompt(*, note: dict[str, str], command_text: str) -> str:
+    """Assemble the user turn for one voice-edit command: the current note
+    (so remove/move have something to quote verbatim from) plus the single
+    spoken command to translate."""
+    sections = "\n\n".join(
+        f"{name.upper()}:\n{note.get(name) or '(empty)'}"
+        for name in ("subjective", "objective", "assessment", "plan")
+    )
+    return f'CURRENT NOTE:\n{sections}\n\nSPOKEN COMMAND: "{command_text}"'

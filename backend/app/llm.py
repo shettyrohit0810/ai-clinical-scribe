@@ -35,6 +35,7 @@ MODEL_FINAL = "claude-sonnet-4-6"  # quality budget: final notes, voice edits
 MODEL_DRAFT = "claude-haiku-4-5"  # latency/cost budget: interim dictation drafts
 
 MAX_OUTPUT_TOKENS = 2000  # hard cap: a SOAP note fits comfortably; runaway costs don't
+MAX_PATCH_TOKENS = 300  # a voice-edit patch is a handful of short JSON fields
 
 USER_FACING_FAILURE = "Generation failed — your transcript is safe. Try again."
 
@@ -93,6 +94,47 @@ async def stream_completion(
         # the application stays fully usable.
         logger.exception("LLM call #%d failed model=%s", call_no, model)
         yield "error", USER_FACING_FAILURE
+
+
+async def complete_json(
+    *,
+    model: str,
+    system: str,
+    user_prompt: str,
+    max_tokens: int = MAX_PATCH_TOKENS,
+) -> tuple[str, str]:
+    """One-shot (non-streaming) completion for small structured outputs —
+    currently just voice-edit patches (Phase 8). A patch is a handful of
+    short JSON fields, not a multi-paragraph note, so there is nothing to
+    gain from token-by-token streaming here; a single request/response round
+    trip is simpler and the whole point of a "patch, not a regenerated
+    note" design in the first place.
+
+    Returns ("ok", raw_text) or ("error", user_facing_message) — same
+    never-raises resilience contract as stream_completion, through the same
+    single Anthropic client singleton.
+    """
+    call_no = next(_call_counter)
+    logger.info(
+        "LLM call #%d start model=%s max_tokens=%d (non-streaming)",
+        call_no, model, max_tokens,
+    )
+    try:
+        message = await _get_client().messages.create(
+            model=model,
+            max_tokens=min(max_tokens, MAX_OUTPUT_TOKENS),
+            system=system,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        text = "".join(block.text for block in message.content if block.type == "text")
+        logger.info(
+            "LLM call #%d done in=%d out=%d",
+            call_no, message.usage.input_tokens, message.usage.output_tokens,
+        )
+        return "ok", text
+    except Exception:
+        logger.exception("LLM call #%d failed model=%s", call_no, model)
+        return "error", USER_FACING_FAILURE
 
 
 # ---- fetch_patient_history tool use (Phase 3) --------------------------------

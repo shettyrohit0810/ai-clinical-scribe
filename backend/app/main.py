@@ -27,10 +27,17 @@ from app.routers.encounters import router as encounters_router
 from app.routers.generation import router as generation_router
 from app.routers.icd import router as icd_router
 from app.routers.templates import router as templates_router
+from app.routers.voice_edit import router as voice_edit_router
 
 app = FastAPI(title="AI Clinical Scribe API")
 
 api = APIRouter(prefix="/api")
+# Voice-edit is a WebSocket route, kept off /api on purpose: nginx and the
+# dev Vite proxy each have a SEPARATE /ws location with the Upgrade/
+# Connection headers a WebSocket handshake needs, reserved for this since
+# Phase 0 (see infra/nginx/ai-scribe.conf) rather than bolted onto the
+# SSE-tuned /api location.
+ws = APIRouter(prefix="/ws")
 
 
 @api.get("/health")
@@ -56,3 +63,6 @@ api.include_router(icd_router)
 api.include_router(templates_router)
 api.include_router(dev_router)
 app.include_router(api)
+
+ws.include_router(voice_edit_router)
+app.include_router(ws)
