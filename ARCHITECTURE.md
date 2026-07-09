@@ -37,12 +37,18 @@ modal, Phase 9) from "never logged in".
 client. Cross-provider reads return 404 (not 403) so encounter ids don't leak
 existence. Admins see all rows.
 
-**Note generation (Phase 2, planned)** — transcript + template instructions
-(read from DB at generation time — no cache, no push channel) + top-k ICD
-candidates → Anthropic streaming → SSE to browser → four SOAP panes fill
-incrementally by parsing tagged sections. All LLM traffic goes through one
-client module (timeout, one retry, structured errors, token cap, call
-counter).
+**Note generation (Phase 2, live)** — client flushes its autosave PATCH,
+then opens `GET /api/encounters/{id}/generate` (SSE). The route reads the
+transcript + template instructions fresh from the DB (no cache, no push
+channel — freshness by design), retrieves top-k ICD candidates (local
+hashed-BoW embeddings + Python cosine over `icd_codes`), and streams
+`claude-sonnet-4-6` (tier=final) or `claude-haiku-4-5` (tier=draft) through
+`app/llm.py` — the single LLM gateway (60s timeout, one SDK retry,
+max_tokens cap, call counter, structured errors). `app/stream_parser.py`
+converts tagged sections into per-section SSE deltas; the four SOAP panes
+fill incrementally. Vendor failure → `error` event → calm UI state; the
+draft in the DB is untouched. `<no_clinical_content/>` → refusal event; an
+empty transcript short-circuits without an LLM call.
 
 **Persistence model** — a *draft* is an `encounters` row with `status=draft`
 (DB-backed → survives refresh and works cross-device). Saving appends an

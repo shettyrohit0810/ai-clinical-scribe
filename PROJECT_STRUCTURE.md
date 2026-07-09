@@ -22,15 +22,26 @@ ai-scribe/
 │   │   ├── schemas.py        # Pydantic request/response models
 │   │   ├── auth.py           # bcrypt + JWT + get_current_user/require_admin deps
 │   │   ├── audit.py          # audit_log writer helper
+│   │   ├── llm.py            # THE single Anthropic gateway: tiers, timeout, retry, cap
+│   │   ├── prompts.py        # all prompts: fixed frame, template framing, ICD candidates
+│   │   ├── stream_parser.py  # pure incremental tagged-section parser (fuzz-tested)
+│   │   ├── icd.py            # hashed-BoW embed + cosine + rank_candidates
 │   │   ├── seed.py           # idempotent demo data (python -m app.seed)
+│   │   ├── seed_icd.py       # 64 real ICD-10 codes, embedded at seed time
 │   │   └── routers/
 │   │       ├── auth.py       # /api/auth/{login,logout,me}
-│   │       ├── encounters.py # /api/encounters — provider isolation lives here
+│   │       ├── encounters.py # CRUD+save — provider isolation lives here
+│   │       ├── generation.py # /api/encounters/{id}/generate (SSE)
+│   │       ├── templates.py  # /api/templates (list; admin CRUD in Phase 6)
 │   │       └── dev.py        # /api/dev/stream-test (SSE smoke route)
 │   └── tests/
 │       ├── conftest.py       # scribe_test DB, per-test truncation, client fixture
 │       ├── test_auth.py      # login matrix, expiry, deactivation
-│       └── test_isolation.py # provider A ⇏ provider B's encounters
+│       ├── test_isolation.py # provider A ⇏ provider B's encounters
+│       ├── test_stream_parser.py   # char-by-char chunk fuzzing, refusal, bad JSON
+│       ├── test_encounters_flow.py # returning match, autosave, append-only save
+│       ├── test_generation.py      # mocked-LLM SSE: tiers, candidates, errors
+│       └── test_icd.py             # embedding determinism + relevance
 ├── frontend/
 │   ├── vite.config.ts        # dev proxy /api → 8001 (mirrors prod nginx)
 │   └── src/
@@ -40,7 +51,9 @@ ai-scribe/
 │       ├── auth.tsx          # AuthContext: me/login/logout + RequireAuth
 │       ├── pages/
 │       │   ├── Login.tsx
-│       │   └── Dashboard.tsx # provider's encounter list
+│       │   ├── Dashboard.tsx    # provider's encounter list + New encounter
+│       │   ├── NewEncounter.tsx # identity form, template pick, returning match
+│       │   └── Workspace.tsx    # transcript + streaming SOAP panes + autosave + save
 │       └── StreamTest.tsx    # Phase 0 SSE infrastructure check
 └── infra/
     ├── DEPLOY.md             # numbered AWS runbook

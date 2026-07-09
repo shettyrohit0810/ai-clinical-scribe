@@ -87,3 +87,49 @@ EC2) before writing any product code.
 - `POST /api/auth/login|logout`, `GET /api/auth/me` (UserOut)
 - `GET /api/encounters` (EncounterSummary[]), `GET /api/encounters/{id}`
   (EncounterOut) — provider-scoped, admin sees all
+
+---
+
+## Phase 2 — Core scribe workflow
+
+- **Embedding provider (gap-fill, flagged for review)** — the settled design
+  says "JSONB embeddings + Python cosine" but names no embedding vendor, and
+  Anthropic has no embeddings endpoint. Implemented: deterministic local
+  feature-hashed bag-of-words vectors (256 dims, md5 bucketing, L2-norm).
+  ICD descriptions are short literal phrases, so token overlap IS the signal
+  at this scale — "knee pain" retrieves M25.56x correctly (tested). Storage
+  contract (JSONB float arrays + cosine) is exactly as specced; a vendor
+  swap (e.g. Voyage) is one function (`embed_text`) + re-seed. Revisit at
+  Phase 5 if true semantic matching is wanted.
+- **`encounters.draft_note` JSONB added** — Phase 2's autosave spec requires
+  persisting "transcript + unsaved edits", but the settled schema had no home
+  for unsaved note text. draft_note is mutable workspace scratch; versions
+  remain the immutable record; save clears it. One column, no new table.
+- **SSE generate is GET** — EventSource only speaks GET; safe because
+  generation reads inputs from the DB and the client flushes its autosave
+  PATCH before opening the stream (freshest transcript guaranteed).
+- **Server-side stream parsing** — the tagged-section parser lives in the
+  backend (pure module, char-by-char fuzz-tested), so the client just appends
+  deltas per section. icd_codes are buffered (partial JSON is useless) and
+  malformed JSON degrades to [] rather than failing the note.
+- **Empty transcript short-circuits** — refusal outcome is certain, so no
+  LLM call is spent discovering it.
+- **Retry = SDK max_retries=1** — the spec's "one retry with backoff"
+  delegated to the SDK rather than hand-rolled (it retries connection
+  errors, 408/429, 5xx with exponential backoff).
+- **Templates list omits `instructions`** — prompt material stays
+  server-side; providers choose by name/description. Admin CRUD (Phase 6)
+  is where instructions become visible/editable.
+- **3 templates seeded now** (spec names them in Phase 6) so the Phase 2
+  selector demos real behavior; verified live that Urgent Care visibly
+  reshapes output (2 sentences/section + RETURN PRECAUTIONS line).
+
+### Interfaces established
+
+- `POST /api/encounters` → EncounterCreated{returning, prior_encounters}
+- `PATCH /api/encounters/{id}` — autosave {transcript?, template_id?, draft_note?}
+- `POST /api/encounters/{id}/save` → {version_number, saved_at}
+- `GET /api/encounters/{id}/generate?tier=final|draft` — SSE: section /
+  icd_codes / no_clinical_content / error / done
+- `GET /api/templates` → TemplateOut[]
+- `llm.stream_completion(model, system, user_prompt)` → ("delta"|"end"|"error", payload)
