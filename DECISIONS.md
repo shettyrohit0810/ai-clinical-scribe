@@ -364,3 +364,104 @@ EC2) before writing any product code.
 - `GET/POST /api/admin/providers`, `PATCH /api/admin/providers/{id}`
 - `GET/POST /api/admin/templates`, `PATCH /api/admin/templates/{id}`
 - `GET /api/admin/audit?limit=`
+
+---
+
+## Phase 7 — Voice dictation with live SOAP updates
+
+- **Zero backend changes.** The entire feature is client-side: STT via the
+  browser's Web Speech API, and regeneration reuses the existing
+  `GET /api/encounters/{id}/generate?tier=draft|final` SSE endpoint exactly as
+  built in Phase 2 (the `tier=draft` param already existed for this purpose —
+  Phase 2's contract literally names it "Phase 7 rolling dictation"). No
+  parallel generation pipeline, no new router. All 74 backend tests pass
+  unmodified before and after this phase.
+- **`TranscriptionProvider` interface, not a direct `webkitSpeechRecognition`
+  call site** — `frontend/src/transcription.ts` defines
+  `{isSupported, start(handlers), stop()}` and `useDictation`/`Workspace.tsx`
+  only ever talk to that interface. Browser Web Speech is the guaranteed-
+  working implementation for this screen; a Phase 10 stretch (server-side
+  streaming STT: mic → WebSocket → backend → vendor) would implement the same
+  interface, making the swap a one-line change at the construction site
+  rather than a rewrite of the dictation UI or its sync logic.
+- **Self-timed pause/max-interval polling instead of the recognizer's own
+  speech-boundary events** — `onspeechend`/`onaudioend` firing semantics
+  differ enough across Chrome/Safari's `webkitSpeechRecognition`
+  implementations in continuous mode to be an unreliable trigger. Instead
+  `useDictation` runs a 1s `setInterval` checking two wall-clock conditions it
+  controls itself: 2s since the last finalized chunk (a pause), or 6s since
+  the last regeneration (force-refresh during long continuous speech) —
+  directly implementing the spec's "on each pause OR every ~6s of new
+  finalized text."
+- **Two-tier model choice is the latency answer, unchanged from Phase 2** —
+  rolling regeneration uses `claude-haiku-4-5` so the SOAP panes stay
+  responsive during active dictation; the stop-triggered generation uses
+  `claude-sonnet-4-6` once, for the quality-weighted final note. This is the
+  exact Phase 2 tier split, invoked with a new caller (auto-triggered, not
+  button-clicked) rather than a new mechanism.
+- **Transcript is a single editable buffer; dictation only appends to it** —
+  `onFinal` reads the CURRENT transcript value (`getTranscript()`) fresh at
+  commit time, not a value captured when dictation started, and appends the
+  new chunk to it. This is what makes manual edits made between or during
+  dictation bursts (including corrections typed while paused) survive: the
+  next spoken chunk lands after whatever text — hand-typed or dictated —
+  currently occupies the buffer. Interim (unfinalized) text is displayed but
+  never written to the buffer or sent to the server.
+- **Dirty-note guard applies uniformly to BOTH auto-trigger types, not just
+  rolling regen** — the spec's "manual edits ... preserved between bursts"
+  requirement is satisfied by tracking `noteDirty` (set on any SOAP-pane
+  `onChange`) and having `generate({auto: true})` return immediately —
+  before opening an `EventSource` — whenever `noteDirty` is true. This check
+  fires identically whether the auto-call came from the rolling-draft timer
+  or from Stop's final-tier call: a clinician who edited the Assessment
+  mid-dictation should not have Stop silently overwrite that edit just
+  because it's the "final" tier. Only the manual "Generate note" button
+  ignores the guard (explicit user action always wins); it also clears
+  `noteDirty` on completion so auto-updates resume.
+- **Deferred pane-clearing** — `generate()`'s existing per-call clearing
+  logic was changed to clear a SOAP pane only when the first real content for
+  it arrives (first `section`/`icd_codes` event), not eagerly at call time.
+  Rolling auto-regeneration fires every few seconds during a live session;
+  clearing panes up front would blank visible content for the round-trip
+  duration on every rolling regen, a visible flicker the manual
+  once-per-click flow never had to avoid.
+- **`optsRef` latest-ref pattern to avoid stale closures in the timer** —
+  `useDictation`'s 1s check-interval and the Web Speech recognizer's
+  event handlers are long-lived relative to `Workspace` re-renders; every
+  transcript change gives `generate()` (and therefore
+  `onRollingRegenerate`/`onFinalRegenerate`) a new identity. Closing over
+  hook options directly at `start()`-time would freeze those callbacks to
+  whatever `transcript`/`noteDirty` existed at that moment, letting a long
+  session fire regeneration against stale state. Fixed by routing every read
+  through a ref updated on every render (`optsRef.current = opts`) and never
+  read during render — the same pattern used elsewhere in this codebase for
+  autosave flushing.
+- **`hadErrorRef` guards against an infinite restart loop** — the Web Speech
+  recognizer's `onend` auto-restarts a still-"listening" session (Chrome ends
+  "continuous" sessions on its own after silence, without the user pausing or
+  stopping). Found live: a permission-denial error fires `onerror` then
+  `onend`, and a naive "still listening? restart" rule retried the same
+  failing permission forever. `onError` now also drops state to `"idle"` and
+  clears the poll timer immediately, and `onEnd`'s auto-restart additionally
+  requires `!hadErrorRef.current` (reset per fresh session) — a dead
+  recognizer never shows Listening/Pause/Stop controls, and never retries a
+  condition that can't succeed without user action (e.g. granting mic
+  access).
+- **Testing limitation, stated plainly**: this sandboxed environment has no
+  real microphone. End-to-end verification used a scripted mock of both
+  `window.SpeechRecognition` and `window.webkitSpeechRecognition` (matching
+  the real API's event contract: `onresult`/`onerror`/`onend`) driving the
+  REAL backend over the REAL SSE pipeline — not a mocked LLM. Verified live:
+  rolling haiku regeneration on the pause trigger; a manual pane edit sets
+  `noteDirty` and shows the warning banner; subsequent rolling AND
+  stop-triggered regeneration both correctly skip while dirty (no network
+  call); manual "Generate note" still works regardless of dirty state; a
+  clean (non-dirty) session's Stop correctly triggers the sonnet final
+  generation with real, correct content. A real-microphone smoke test is
+  recommended before recording the walkthrough.
+
+### Interfaces established
+
+No new backend interfaces — see API_CONTRACTS.md "Voice dictation" section
+for the client-side contract (`TranscriptionProvider`, dictation state
+machine, rolling/final trigger conditions).

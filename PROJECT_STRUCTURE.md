@@ -61,11 +61,13 @@ ai-scribe/
 │       ├── App.tsx           # routes: /login, / , /encounters/*, /admin, /stream-test
 │       ├── api.ts            # fetch wrapper: JSON, errors → ApiError(status)
 │       ├── auth.tsx          # AuthContext: me/login/logout + RequireAuth + RequireAdmin
+│       ├── transcription.ts  # TranscriptionProvider interface + WebSpeechTranscriptionProvider (Web Speech API, client-only, ambient type decls)
+│       ├── useDictation.ts   # dictation state machine: start/pause/resume/stop, interim tracking, rolling-regen trigger timer
 │       ├── pages/
 │       │   ├── Login.tsx
 │       │   ├── Dashboard.tsx    # encounter list + New encounter + Admin dashboard link
 │       │   ├── NewEncounter.tsx # identity form, template pick, returning match
-│       │   ├── Workspace.tsx    # transcript + streaming SOAP panes + autosave + save + version history + ICD search widget
+│       │   ├── Workspace.tsx    # transcript + streaming SOAP panes + autosave + save + version history + ICD search widget + voice dictation (useDictation) with noteDirty guard against auto-regen overwriting manual edits
 │       │   ├── AdminDashboard.tsx # tab shell: Encounters / Providers / Templates / Audit log
 │       │   └── admin/
 │       │       ├── EncountersTab.tsx  # provider + date-range filters over GET /api/encounters

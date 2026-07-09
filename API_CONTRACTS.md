@@ -158,3 +158,35 @@ Exactly one terminal event per stream: `done` or `error`.
 |---|---|---|
 | GET | `/api/health` | `{status, database}` — unauthenticated; used by deploy runbook |
 | GET | `/api/dev/stream-test` | SSE numbers 1–20 @200ms; `event: done` terminator. Infrastructure check (Phase 0 DoD). |
+
+## Voice dictation (Phase 7, client-side only)
+
+No new backend endpoints. Dictation reuses `GET /api/encounters/{id}/generate`
+verbatim (`tier=draft` for rolling regen, `tier=final`/no param for the
+stop-triggered generation) — this section documents the client-side flow that
+drives those existing calls.
+
+- **Transcription never touches the backend.** The browser's Web Speech API
+  (`window.SpeechRecognition` / `webkitSpeechRecognition`) streams interim and
+  final results entirely client-side, behind a `TranscriptionProvider`
+  interface (`frontend/src/transcription.ts`). Only the resulting text ever
+  reaches the server, via the same autosave PATCH the manual transcript
+  textarea already used.
+- **Transcript is a single append-only buffer.** Finalized speech chunks are
+  appended to whatever the transcript field currently holds — including any
+  manual edits typed between or during dictation bursts. Interim (not-yet-
+  final) text is displayed live but never committed to the buffer or sent to
+  the server.
+- **Rolling regeneration trigger**: `useDictation` (`frontend/src/useDictation.ts`)
+  self-times two conditions via a 1s poll — 2s of silence since the last
+  finalized chunk ("a pause"), or 6s elapsed since the last regeneration
+  (force-refresh during continuous speech) — and calls
+  `GET .../generate?tier=draft` (haiku) when either fires and there's
+  unregenerated speech pending.
+- **Final regeneration**: on Stop Dictation, one `GET .../generate` call at
+  `tier=final` (sonnet, the existing default).
+- **Dirty-note guard**: if the clinician has hand-edited a SOAP pane since the
+  last generation (`noteDirty`), BOTH the rolling draft trigger and the
+  stop-triggered final trigger are skipped — no network call, panes untouched.
+  This is a uniform rule across both auto-trigger types; only an explicit
+  manual "Generate note" click bypasses it. See DECISIONS.md Phase 7 for why.

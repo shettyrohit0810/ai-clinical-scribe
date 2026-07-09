@@ -95,6 +95,38 @@ search infrastructure, no vendor, no vector DB.
   `record_audit` helper from Phase 1; every mutation above writes a row in
   the same transaction as the action it records.
 
+**Voice dictation (Phase 7, live)** — entirely client-side; no new backend
+surface. `frontend/src/transcription.ts` wraps the browser's Web Speech API
+behind a `TranscriptionProvider` interface (`isSupported`, `start(handlers)`,
+`stop()`); `frontend/src/useDictation.ts` is the dictation state machine
+(idle/listening/paused) built on top of it. Data flow:
+
+1. **Interim/final speech → transcript buffer.** The recognizer emits interim
+   text (displayed live, never persisted) and finalized chunks (appended to
+   whatever the transcript buffer currently holds — including manual edits
+   made between or during dictation bursts — via the existing autosave PATCH
+   path, unchanged from earlier phases).
+2. **Rolling regeneration.** A self-timed 1s poll fires
+   `GET .../generate?tier=draft` (haiku) on a 2s pause since the last final
+   chunk, or every 6s of continuous speech, whichever comes first — the exact
+   SSE pipeline and stream parser from Phase 2, just invoked with `tier=draft`
+   by a timer instead of a button.
+3. **Final regeneration.** On Stop Dictation, one `GET .../generate` call at
+   the default `tier=final` (sonnet) — same call the manual "Generate note"
+   button makes.
+4. **Sync guard.** Both auto-triggers above are skipped whenever the
+   clinician has hand-edited a SOAP pane since the last generation
+   (`noteDirty`, set on any pane's `onChange`) — checked before the
+   `EventSource` even opens, so a dirty note is never silently overwritten by
+   either the rolling draft or the stop-triggered final. Only the manual
+   Generate button bypasses this guard.
+
+Because dictation drives the same `generate` endpoint and stream parser every
+other trigger uses, the SOAP panes, ICD candidate list, and history tool-call
+flow (Phase 3) all work identically whether a generation was clicked or
+auto-triggered by dictation — there is exactly one generation pipeline in
+this system, not two.
+
 ## Component responsibilities
 
 | Component | Owns |
