@@ -64,6 +64,15 @@ invariant is enforced by the DB (`UniqueConstraint(encounter_id,
 version_number)`) and proven by an exact-value re-read test, not just a row
 count.
 
+**ICD-10 search widget (Phase 5, live)** — `GET /api/icd/search?q=<text>`
+is a second, direct caller of the same `rank_candidates` function generation
+uses internally: provider types a query, gets the top 5 by local
+hashed-BoW-embedding cosine, and clicking a result appends
+`"{code}: {description}"` into the open note's **Assessment** text. The
+289-code catalog (target 250-300) is embedded once at seed time by the same
+idempotent upsert script generation's candidates already relied on — no new
+search infrastructure, no vendor, no vector DB.
+
 ## Component responsibilities
 
 | Component | Owns |

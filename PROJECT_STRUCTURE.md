@@ -34,6 +34,7 @@ ai-scribe/
 │   │       ├── auth.py       # /api/auth/{login,logout,me}
 │   │       ├── encounters.py # CRUD+save — provider isolation lives here
 │   │       ├── generation.py # /api/encounters/{id}/generate (SSE)
+│   │       ├── icd.py        # /api/icd/search — ICD-10 widget (same rank_candidates as generation)
 │   │       ├── templates.py  # /api/templates (list; admin CRUD in Phase 6)
 │   │       └── dev.py        # /api/dev/stream-test (SSE smoke route)
 │   └── tests/
@@ -46,7 +47,8 @@ ai-scribe/
 │       ├── test_icd.py             # embedding determinism + relevance
 │       ├── test_history.py         # history block + route tool events + audit
 │       ├── test_llm_tool_loop.py   # tool loop vs scripted fake SDK client
-│       └── test_versioning.py      # append-only invariant, list/view, isolation
+│       ├── test_versioning.py      # append-only invariant, list/view, isolation
+│       └── test_icd_search.py      # search endpoint + 289-code catalog integrity
 ├── frontend/
 │   ├── vite.config.ts        # dev proxy /api → 8001 (mirrors prod nginx)
 │   └── src/
