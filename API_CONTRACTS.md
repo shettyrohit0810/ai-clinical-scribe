@@ -51,6 +51,26 @@ and `GET /api/dev/stream-test` requires an authenticated session:
 |---|---|---|
 | GET | `/api/templates` | `TemplateOut[]{id, name, description}` — active templates only. `instructions` are deliberately NOT exposed here (server-side prompt material, read fresh from the DB at generation time). Admin CRUD arrives in Phase 6. |
 
+## ICD-10 search widget
+
+| Method | Path | Query → Response |
+|---|---|---|
+| GET | `/api/icd/search` | `?q=<free text>` (2–200 chars) → `IcdCodeItem[]{code, description}`, top 5 by cosine similarity. |
+
+- Ad-hoc search the provider drives by typing (e.g. "knee pain") — distinct
+  from the candidate list injected into note generation (same underlying
+  `rank_candidates`, called directly instead of from inside a prompt).
+- Local embedding + Python cosine only — no vendor call on this path, not
+  even a mocked one; fully deterministic.
+- `422` if `q` is under 2 characters. `401` unauthenticated (any signed-in
+  role, not provider-scoped — the catalog has no patient data to isolate).
+- Frontend: results render as a click list in the workspace; clicking a
+  result appends `"{code}: {description}"` to the open note's **Assessment**
+  text. This is separate from the `icd_codes` chips populated by
+  generation — search-widget additions are free text the clinician chose,
+  not model output, so they don't need the candidate-constrained provenance
+  the generation flow guarantees.
+
 ## Note generation (SSE)
 
 `GET /api/encounters/{id}/generate?tier=final|draft`

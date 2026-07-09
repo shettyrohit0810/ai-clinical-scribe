@@ -246,3 +246,50 @@ EC2) before writing any product code.
 
 - `GET /api/encounters/{id}/versions` → `NoteVersionSummary[]`
 - `GET /api/encounters/{id}/versions/{version_number}` → `NoteVersionOut`
+
+---
+
+## Phase 5 — ICD-10 semantic search widget
+
+- **Catalog expanded to 289 real codes (target 250-300), same seed
+  mechanism, no new infrastructure** — `seed_icd.py` gained ~225 rows across
+  specialties absent or thin in the Phase 2 starter set (rotator cuff,
+  epicondylitis, radiculopathy, COPD/OSA, arrhythmia subtypes, diabetes
+  complications, GERD/IBS/diverticulitis, BPH/incontinence, migraine
+  subtypes/TIA, bipolar/PTSD/OCD, psoriasis/rosacea, cataract/glaucoma,
+  zoster/Lyme, common fracture/sprain/burn codes, pediatric and OB
+  encounters, malnutrition/BMI). The upsert-by-code seed function was
+  already idempotent and vendor-agnostic — expansion is pure data, zero
+  logic changes. **Local embedding + Python cosine kept exactly as
+  approved; no external embedding provider or vector database introduced,
+  per explicit instruction.**
+- **A real search endpoint, distinct from generation's internal
+  candidates** — Phase 2 only used `rank_candidates` inside the generation
+  prompt (candidate-constrained selection). Phase 5's spec calls for a
+  provider-driven widget ("search = embed query → cosine → top 5 → click
+  appends"), which is a different access pattern: synchronous, ad-hoc,
+  triggered by typing, no LLM in the loop at all. `GET /api/icd/search`
+  reuses `rank_candidates` directly — the exact same local embed+cosine
+  function, called from a new caller rather than duplicated.
+- **Click appends to Assessment text, not to the `icd_codes` chip array**
+  — the spec says "click appends code+description to the open note's
+  Assessment," which is the clinician's own annotation (free text), not a
+  model-selected, candidate-constrained code. Keeping the two paths
+  separate preserves the generation flow's provenance guarantee (every
+  chip in `icd_codes` came from the model choosing among backend-supplied
+  candidates) without overloading it with manually-added codes that never
+  went through that constraint.
+- **No provider scoping on `/icd/search`** — the ICD catalog is reference
+  data with no patient information; every other endpoint's isolation model
+  (provider-scoped, 404 across providers) doesn't apply because there is
+  nothing to isolate. Any authenticated user (provider or admin) can search.
+- **Tests stay LLM-free, including the spec's exact scenario** — the "knee
+  pain" → M25.56x-family test lives at both layers: `test_icd.py` already
+  covered `rank_candidates` directly (Phase 2); `test_icd_search.py` now
+  covers the same scenario through the HTTP endpoint, plus a
+  catalog-integrity check (250-300 codes, no duplicates) so a future data
+  edit that breaks the range or introduces a dup fails CI, not a demo.
+
+### Interfaces established
+
+- `GET /api/icd/search?q=<text>` → `IcdCodeItem[]` (top 5, cosine-ranked)
