@@ -179,11 +179,62 @@ ENCOUNTERS = [
 ]
 
 
+# Instructions are deliberately divergent so the template-switch demo shows
+# VISIBLY different notes (Phase 6 requirement, seeded now for Phase 2's
+# selector). Content is UNTRUSTED at generation time — see prompts.py.
+TEMPLATES = [
+    (
+        "New Patient Evaluation",
+        "Comprehensive first-visit documentation.",
+        "Comprehensive style. Open the subjective section with a one-line "
+        "chief complaint prefixed 'CC:', then a detailed history paragraph. "
+        "Include a line of pertinent negatives. Write the plan as a numbered "
+        "list, always ending with a numbered patient-education item and a "
+        "follow-up interval.",
+    ),
+    (
+        "Orthopedic Follow-up",
+        "Focused musculoskeletal re-check.",
+        "Focused musculoskeletal style. Use short bullet points (dash "
+        "prefix) in every section rather than paragraphs. Subjective must "
+        "include a functional-status bullet (work, mobility, sleep impact). "
+        "Objective leads with the affected joint or region. Compare with "
+        "prior findings when history is available.",
+    ),
+    (
+        "Urgent Care",
+        "Brief episodic visit.",
+        "Brief episodic style. Maximum two short sentences per section. "
+        "The plan must end with a final line beginning 'RETURN PRECAUTIONS:' "
+        "in capital letters listing when to seek immediate care.",
+    ),
+]
+
+
+def seed_templates(db) -> bool:
+    """Idempotent by name; created_by = the admin user."""
+    from app.models import Template
+
+    if db.scalar(select(Template).limit(1)) is not None:
+        return False
+    admin = db.scalar(select(User).where(User.role == UserRole.admin))
+    for name, description, instructions in TEMPLATES:
+        db.add(Template(
+            name=name, description=description,
+            instructions=instructions, created_by=admin.id,
+        ))
+    db.commit()
+    return True
+
+
 def seed() -> None:
     db = SessionLocal()
     try:
         if db.scalar(select(User).limit(1)) is not None:
-            print("Seed skipped: users already exist.")
+            if seed_templates(db):
+                print("Seeded 3 templates (users already existed).")
+            else:
+                print("Seed skipped: users and templates already exist.")
             return
 
         password_hash = hash_password(DEMO_PASSWORD)  # hash once, reuse — bcrypt is slow by design
@@ -224,7 +275,9 @@ def seed() -> None:
             )
 
         db.commit()
-        print(f"Seeded {len(USERS)} users, {len(PATIENTS)} patients, {len(ENCOUNTERS)} saved encounters.")
+        seed_templates(db)
+        print(f"Seeded {len(USERS)} users, {len(PATIENTS)} patients, "
+              f"{len(ENCOUNTERS)} saved encounters, {len(TEMPLATES)} templates.")
         print(f"All demo logins use password: {DEMO_PASSWORD}")
     finally:
         db.close()
