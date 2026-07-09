@@ -447,6 +447,25 @@ EC2) before writing any product code.
   recognizer never shows Listening/Pause/Stop controls, and never retries a
   condition that can't succeed without user action (e.g. granting mic
   access).
+- **Post-ship fix: transcript textarea was read-only while listening** — the
+  initial implementation set `readOnly={dictation.state === "listening"}` and
+  spliced the live interim guess directly into the displayed value, to avoid
+  a keystroke racing against interim text being rewritten every recognition
+  tick. That satisfied the sync-safety goal but violated the actual spec:
+  "providers should be able to manually edit the transcript while dictating."
+  Root cause was conflating two different things in one value — the
+  committed, editable buffer and the algorithmically-driven live guess. Fix:
+  the textarea's `value` is now always just the committed `transcript` (never
+  read-only), and the interim guess is displayed separately underneath as a
+  "Hearing: …" readout. `onFinal` already read `getTranscript()` fresh at
+  commit time (see "single editable buffer" above), so no change was needed
+  to `useDictation.ts` for typed edits made mid-listening to be respected —
+  only the display/editability coupling in `Workspace.tsx` was wrong.
+  Verified live: typed a manual correction while the mock recognizer was
+  actively "listening," then emitted a further final chunk — the correction
+  and the new dictated text both landed in the transcript in the order
+  typed/spoken, and the Stop-triggered sonnet generation correctly
+  incorporated both.
 - **Testing limitation, stated plainly**: this sandboxed environment has no
   real microphone. End-to-end verification used a scripted mock of both
   `window.SpeechRecognition` and `window.webkitSpeechRecognition` (matching

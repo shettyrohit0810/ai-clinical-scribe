@@ -405,26 +405,24 @@ export default function Workspace() {
               <DictationControls dictation={dictation} />
             </div>
             <textarea
-              value={
-                dictation.state === "listening"
-                  ? transcript +
-                    (dictation.interim
-                      ? (transcript && !transcript.endsWith(" ") ? " " : "") + dictation.interim
-                      : "")
-                  : transcript
-              }
+              value={transcript}
               onChange={(e) => setTranscript(e.target.value)}
-              // Read-only only while actively listening: the displayed value
-              // is algorithmically driven by speech events at that point, so
-              // direct typing would race with it. Paused/stopped, the buffer
-              // is a plain editable textarea — this is exactly the window
-              // where "manual edits ... preserved between bursts" happens:
-              // pause, fix a word anywhere in the text, resume, and new
-              // speech appends after your edit untouched.
-              readOnly={dictation.state === "listening"}
+              // Always editable, including while actively listening. The
+              // textarea's value is ONLY the committed transcript — never
+              // the live interim guess (shown separately below) — so typing
+              // here never races against speech events splicing text in
+              // mid-keystroke, and continues to work exactly like editing
+              // while paused: the physician can fix a word anywhere, and
+              // the next finalized chunk appends after whatever the buffer
+              // currently holds, dictated or typed.
               placeholder="Paste or type the encounter transcript, or start dictation…"
-              className="mt-1 min-h-[24rem] flex-1 resize-y rounded border border-slate-300 bg-white p-3 font-mono text-sm leading-relaxed focus:border-blue-600 focus:outline-none read-only:bg-slate-50"
+              className="mt-1 min-h-[24rem] flex-1 resize-y rounded border border-slate-300 bg-white p-3 font-mono text-sm leading-relaxed focus:border-blue-600 focus:outline-none"
             />
+            {dictation.state === "listening" && dictation.interim && (
+              <p className="mt-1 text-xs italic text-slate-400">
+                Hearing: {dictation.interim}
+              </p>
+            )}
             {dictation.error && (
               <p role="alert" className="mt-1 text-xs text-red-700">{dictation.error}</p>
             )}
