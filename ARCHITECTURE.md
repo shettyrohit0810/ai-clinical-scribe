@@ -170,6 +170,39 @@ microphone, two incompatible ways of using it) — enforced by disabling each
 mode's Start button while the other is active, not by anything in either
 hook.
 
+**Non-happy-path recovery (Phase 9, live)** — no new backend surface; this
+is entirely how the frontend consumes error contracts that already existed
+(`"Session expired"` and `"Account deactivated"` since Phase 1/6,
+`<no_clinical_content/>` refusal since Phase 2). Two distinct recovery
+shapes, both centralized in `frontend/src/api.ts` (the one wrapper every
+request already goes through) rather than handled per-component:
+
+1. **Session expiry → recoverable, transparently retried.** `api()`
+   catches `401 "Session expired"`, calls `requestReauth()`
+   (`frontend/src/sessionExpiry.ts` — a small broker with no React
+   dependency, since `api.ts` has no component to render a modal from),
+   which `AuthProvider` has registered to show a re-login modal and
+   resolve once the physician re-authenticates. `api()` then replays the
+   EXACT SAME request once and returns its result to the original caller
+   — `flushAutosave`, `saveVersion`, or any future protected call needs no
+   awareness that this happened. Concurrent requests expiring together
+   share one in-flight re-login promise, so only one modal ever appears.
+2. **Deactivation → terminal, whole-app block.** `api()` catches
+   `403 "Account deactivated"` and calls `notifyDeactivated()`, which sets
+   one flag in `AuthProvider` that replaces the entire routed app with a
+   blocking screen. Unlike session expiry this is never retried —
+   re-authenticating can't fix a deactivated account, so every subsequent
+   call would fail the same way. If a re-auth modal happens to be open
+   when deactivation is detected, the deactivation handler explicitly
+   closes it and rejects its pending promise (found live: without this,
+   the modal became unreachable once the block screen rendered, leaving
+   its promise resolved by nothing, forever).
+
+Both paths leave the actual draft untouched by construction: session
+expiry never modifies local React state (only the network call was
+paused), and deactivation only ever flips `users.is_active` — it never
+touches `encounters` or `note_versions`.
+
 ## Component responsibilities
 
 | Component | Owns |

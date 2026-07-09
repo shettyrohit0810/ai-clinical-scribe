@@ -10,6 +10,7 @@ ai-scribe/
 ├── PROJECT_STRUCTURE.md      # this file
 ├── API_CONTRACTS.md          # endpoint + SSE event contract (frontend mirrors it)
 ├── DECISIONS.md              # per-phase decision log
+├── DEMO_FAILURES.md          # <90s scripts for the 3 non-happy-path demos (Phase 9)
 ├── backend/
 │   ├── requirements.txt      # runtime deps (approved stack)
 │   ├── requirements-dev.txt  # pytest + httpx (tests only)
@@ -63,8 +64,9 @@ ai-scribe/
 │   └── src/
 │       ├── main.tsx          # entry; router lives in App
 │       ├── App.tsx           # routes: /login, / , /encounters/*, /admin, /stream-test
-│       ├── api.ts            # fetch wrapper: JSON, errors → ApiError(status)
-│       ├── auth.tsx          # AuthContext: me/login/logout + RequireAuth + RequireAdmin
+│       ├── api.ts            # fetch wrapper: JSON, errors → ApiError(status); Phase 9: transparent session-expiry retry + deactivation detection
+│       ├── sessionExpiry.ts  # broker between api.ts (no React) and auth.tsx (renders the modal): dedup'd reauth request + deactivation notify
+│       ├── auth.tsx          # AuthContext: me/login/logout + RequireAuth + RequireAdmin + Phase 9 re-auth modal + deactivated block screen
 │       ├── transcription.ts  # TranscriptionProvider interface + WebSpeechTranscriptionProvider (Web Speech API, client-only, ambient type decls)
 │       ├── useDictation.ts   # dictation state machine: start/pause/resume/stop, interim tracking, rolling-regen trigger timer
 │       ├── useVoiceEdit.ts   # voice-edit state machine: WebSocket + TranscriptionProvider (command mode) + speechSynthesis TTS w/ interruption
@@ -98,3 +100,6 @@ ai-scribe/
   the Anthropic SDK directly.
 - Frontend: `pages/*` talk to the backend only through `api.ts`; `auth.tsx`
   is the only holder of session state.
+- `sessionExpiry.ts` is deliberately React-free (a plain module `api.ts` can
+  import without creating a circular dependency on `auth.tsx`, which itself
+  imports `api.ts`) — it only ever holds function references, never state.

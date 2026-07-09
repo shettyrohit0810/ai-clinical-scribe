@@ -25,6 +25,36 @@ and `GET /api/dev/stream-test` requires an authenticated session:
   cross-provider access returns **404** (not 403 — existence must not leak).
   Admins see all encounters.
 
+### Client-side recovery (Phase 9)
+
+No new backend surface — both failure modes above were already
+distinguished by message/status since Phase 1/6. This documents how the
+frontend now consumes that distinction.
+
+- **`401 "Session expired"` → transparent re-auth-and-retry.** Every
+  request goes through one shared wrapper (`frontend/src/api.ts`). On this
+  specific error, it pauses the call, shows a re-login modal
+  (`frontend/src/auth.tsx`), and — once the user re-authenticates — replays
+  the EXACT SAME request once, returning that result to the original
+  caller as if nothing happened. Callers (autosave, save-as-version, any
+  future protected call) need no special-case code; the recovery lives
+  entirely in the one place every request already passes through. If
+  several requests expire together, they all share one in-flight re-login
+  promise — only one modal ever shows (`frontend/src/sessionExpiry.ts`).
+  Other 401s (`"Not authenticated"`, `"Invalid session"`) are NOT
+  recoverable this way and fall through to the normal `RequireAuth`
+  redirect-to-login.
+- **`403 "Account deactivated"` → terminal, full-screen block.** Detected
+  in the same wrapper; NOT retried (re-authenticating won't fix a
+  deactivated account — every subsequent call would 403 again regardless).
+  Sets a global flag that replaces the entire routed app with a blocking
+  "Account deactivated — your draft is preserved" screen. The draft itself
+  is never at risk: deactivation only ever flips `users.is_active`, never
+  touches `encounters`/`note_versions`.
+
+See DECISIONS.md Phase 9 for the dedup/interceptor design and an edge case
+found and fixed during live testing.
+
 ## Auth
 
 | Method | Path | Body → Response |

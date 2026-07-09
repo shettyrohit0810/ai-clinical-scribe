@@ -694,3 +694,99 @@ path) is exactly what got built.
   in the same gateway module.
 - `auth.get_current_user_ws(websocket, db)` — WebSocket auth counterpart to
   `get_current_user`, returns `None` instead of raising.
+
+---
+
+## Phase 9 — Non-happy paths
+
+Zero backend changes. `"Session expired"`, `"Not authenticated"`, and
+`"Account deactivated"` were already distinguished by message/status since
+Phase 1 (auth) and Phase 6 (deactivation); `<no_clinical_content/>` refusal
+handling was already built in Phase 2. This phase is entirely about the
+frontend finally consuming those existing, already-correct backend
+contracts instead of the raw error just failing silently or crashing.
+
+- **One interceptor in `api.ts`, not per-caller error handling** — every
+  `api()` call transparently recovers from `"Session expired"` (pause,
+  show a re-login modal, replay the exact same request, return its result
+  to the original caller) with zero changes needed at any call site.
+  `flushAutosave`, `saveVersion`, and any future protected call all get
+  this for free. This mirrors the project's established "one gateway"
+  pattern (`llm.py` for the vendor, `get_current_user` for auth
+  validation) applied to the client side: recovery lives in the one place
+  every request already passes through, not duplicated into every
+  component that happens to call `api()`.
+- **A tiny broker module (`sessionExpiry.ts`) bridges `api.ts` and
+  `auth.tsx`** — `api.ts` is a plain module with no React context; the
+  modal has to be rendered by something that IS a component. Rather than
+  thread a re-auth callback through every caller, `api.ts` calls
+  `requestReauth()` and `AuthProvider` registers the function that
+  actually shows the modal, entirely decoupling "detecting the failure"
+  from "presenting the recovery UI." Multiple requests expiring together
+  share ONE in-flight promise (deduped in the broker) — without this, a
+  autosave tick and a manual Save clicked in the same moment would each
+  try to show their own modal and race two separate login attempts against
+  each other.
+- **`logout()` deliberately bypasses `api()`, using a raw `fetch`
+  instead** — found live, not by inspection: the "Log out instead" escape
+  hatch on the re-auth modal calls `logout()`, whose own
+  `POST /api/auth/logout` would ALSO 401 with `"Session expired"` if the
+  same stale cookie is still attached — which, going through the normal
+  interceptor, would call `requestReauth()` again and reopen the very
+  modal the user just tried to leave. `logout()`'s server-side call doesn't
+  need to succeed for the client to consider itself logged out (it never
+  did — the original code already had a bare `.catch(() => {})`), so it
+  never needed the interceptor's recovery behavior in the first place; the
+  fix was routing it around that behavior entirely, not adding a guard on
+  top of it.
+- **Deactivation is a terminal, whole-app block — not a per-component
+  error state** — a deactivated account isn't a single failed request to
+  retry; every subsequent call will 403 the same way. `notifyDeactivated()`
+  sets one global flag in `AuthProvider` that replaces `{children}`
+  entirely with a blocking screen, rather than leaving each page to decide
+  how to render a 403 it happened to catch. The draft itself was never at
+  risk — deactivation only ever flips `users.is_active`; `encounters` and
+  `note_versions` are untouched, which is exactly why the message can
+  truthfully say "your draft is preserved" rather than hedge.
+- **Post-ship fix, found in live testing: deactivation mid-reauth left two
+  overlapping UI states** — triggering deactivation while a "Session
+  expired" modal happened to already be open (a real sequence: the
+  session had also expired) meant `submitReauth`'s login attempt itself
+  came back `403 Account deactivated`, which correctly set the global
+  block flag — but nothing closed the now-unreachable modal underneath it,
+  and its pending retry promise was left permanently unresolved (the modal
+  that would have resolved it was no longer rendered, and nothing else
+  could reach it). Fixed by having the deactivation handler explicitly
+  close the modal and reject any pending re-auth promise at the same time
+  it sets the block flag — deactivation fully pre-empts an in-flight
+  session-expiry recovery rather than leaving both to render at once.
+- **The demo technique for session expiry is a real, temporary
+  `.env` change (`JWT_EXPIRE_MINUTES=1`), not a fake/simulated 401** — a
+  corrupted or hand-edited cookie produces `"Invalid session"`
+  (`jwt.InvalidTokenError`), a DIFFERENT branch in `get_current_user` than
+  the one this phase's recovery flow targets (`jwt.ExpiredSignatureError`
+  → `"Session expired"`). Demoing the actual code path requires an
+  actually-expired-but-validly-signed token, which means either waiting
+  out the real 30-minute default or shortening it for the recording.
+  Documented as a one-line, fully-reversible `.env` addition in
+  DEMO_FAILURES.md rather than adding any demo-only code path to the app
+  itself.
+- **Verified live** (not just unit-level): a real expired JWT (1-minute
+  override) mid-"Save note" showed the modal with the draft still visible
+  behind it; re-authenticating retried the save automatically and created
+  a new version whose content — fetched back from the API afterward —
+  contained the exact marker text typed before expiry, byte for byte.
+  Deactivation was tested as a genuine cross-session scenario (a `curl`
+  session acting as admin, completely separate from the browser's cookie
+  jar, deactivating the provider mid-draft); the browser tab's very next
+  autosave tick correctly rendered the blocking screen, the audit log
+  showed `provider_deactivate`, and the draft's content was confirmed
+  byte-identical via the admin session's own read of the same version
+  afterward. No-clinical-content was re-confirmed unchanged from Phase 2:
+  refusal message shown, prior SOAP content left untouched, no new version
+  created.
+
+### Interfaces established
+
+None — this phase is entirely frontend consumption of existing backend
+contracts. See API_CONTRACTS.md "Client-side recovery" for the details.
