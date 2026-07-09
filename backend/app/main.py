@@ -24,6 +24,7 @@ from app.routers.auth import router as auth_router
 from app.routers.dev import router as dev_router
 from app.routers.encounters import router as encounters_router
 from app.routers.generation import router as generation_router
+from app.routers.icd import router as icd_router
 from app.routers.templates import router as templates_router
 
 app = FastAPI(title="AI Clinical Scribe API")
@@ -49,6 +50,7 @@ def health(db: Session = Depends(get_db)) -> dict[str, str]:
 api.include_router(auth_router)
 api.include_router(encounters_router)
 api.include_router(generation_router)
+api.include_router(icd_router)
 api.include_router(templates_router)
 api.include_router(dev_router)
 app.include_router(api)
