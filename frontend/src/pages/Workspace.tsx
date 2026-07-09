@@ -10,6 +10,10 @@ import {
   type Template,
 } from "../api";
 
+// Debounce delay for the ICD search-as-you-type box — short enough to feel
+// live, long enough that "knee pain" doesn't fire five separate requests.
+const ICD_SEARCH_DEBOUNCE_MS = 300;
+
 const SECTIONS = ["subjective", "objective", "assessment", "plan"] as const;
 type SectionName = (typeof SECTIONS)[number];
 type NoteText = Record<SectionName, string>;
@@ -50,6 +54,13 @@ export default function Workspace() {
   const [saveState, setSaveState] = useState<SaveState>("clean");
   const [savedVersion, setSavedVersion] = useState<number | null>(null);
   const [showBanner, setShowBanner] = useState(routeState?.returning ?? false);
+
+  // ICD-10 search widget — separate from `icdCodes` (the model-selected,
+  // candidate-constrained chips): search results are the clinician's own
+  // pick, appended as free text into Assessment, not into that chip array.
+  const [icdQuery, setIcdQuery] = useState("");
+  const [icdResults, setIcdResults] = useState<IcdCode[]>([]);
+  const [icdSearching, setIcdSearching] = useState(false);
 
   // Version history: summaries for the panel, full content only when viewing.
   const [versions, setVersions] = useState<NoteVersionSummary[]>([]);
@@ -103,6 +114,33 @@ export default function Workspace() {
     } catch {
       setViewingError(true);
     }
+  }
+
+  // ---- ICD-10 search widget (debounced ~300ms) --------------------------
+  useEffect(() => {
+    const q = icdQuery.trim();
+    if (q.length < 2) {
+      setIcdResults([]);
+      setIcdSearching(false);
+      return;
+    }
+    setIcdSearching(true);
+    const timer = setTimeout(() => {
+      api<IcdCode[]>(`/api/icd/search?q=${encodeURIComponent(q)}`)
+        .then(setIcdResults)
+        .catch(() => setIcdResults([]))
+        .finally(() => setIcdSearching(false));
+    }, ICD_SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [icdQuery]);
+
+  function appendIcdToAssessment(c: IcdCode) {
+    setNote((prev) => ({
+      ...prev,
+      assessment: prev.assessment
+        ? `${prev.assessment}\n${c.code}: ${c.description}`
+        : `${c.code}: ${c.description}`,
+    }));
   }
 
   // ---- autosave (debounced ~3s) ----------------------------------------
@@ -343,6 +381,14 @@ export default function Workspace() {
               </div>
             </div>
           )}
+
+          <IcdSearchWidget
+            query={icdQuery}
+            onQueryChange={setIcdQuery}
+            results={icdResults}
+            searching={icdSearching}
+            onAppend={appendIcdToAssessment}
+          />
         </section>
 
         {/* Full-width: version history */}
@@ -468,6 +514,57 @@ function VersionViewerModal({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function IcdSearchWidget({
+  query,
+  onQueryChange,
+  results,
+  searching,
+  onAppend,
+}: {
+  query: string;
+  onQueryChange: (v: string) => void;
+  results: IcdCode[];
+  searching: boolean;
+  onAppend: (c: IcdCode) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
+        Search ICD-10 codes
+      </span>
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => onQueryChange(e.target.value)}
+        placeholder="e.g. knee pain"
+        className="mt-1 w-full rounded border border-slate-300 px-3 py-1.5 text-sm focus:border-blue-600 focus:outline-none"
+      />
+      {searching && (
+        <p className="mt-2 text-xs text-slate-400">Searching…</p>
+      )}
+      {!searching && results.length > 0 && (
+        <ul className="mt-2 divide-y divide-slate-100 rounded border border-slate-100">
+          {results.map((r) => (
+            <li key={r.code}>
+              <button
+                type="button"
+                onClick={() => onAppend(r)}
+                className="flex w-full items-start gap-2 px-2 py-1.5 text-left text-xs hover:bg-slate-50"
+              >
+                <span className="font-mono font-medium text-slate-700">{r.code}</span>
+                <span className="text-slate-500">{r.description}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!searching && query.trim().length >= 2 && results.length === 0 && (
+        <p className="mt-2 text-xs text-slate-400">No matching codes.</p>
+      )}
     </div>
   );
 }
