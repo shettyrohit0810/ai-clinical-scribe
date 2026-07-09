@@ -1,0 +1,32 @@
+# systemd unit for the AI Clinical Scribe backend.
+# Install to /etc/systemd/system/ai-scribe.service (see infra/DEPLOY.md).
+#
+# Security posture (walkthrough talking points):
+# - Binds 127.0.0.1 only — the app is never reachable except through nginx.
+# - No secrets in this file: AWS_SECRET_NAME names the Secrets Manager entry;
+#   the app fetches it at startup using the EC2 instance role.
+# - 2 uvicorn workers on a small instance; with pool_size=10 + max_overflow=5
+#   per worker that caps DB connections at 30 (see backend/app/db.py).
+
+[Unit]
+Description=AI Clinical Scribe API (gunicorn/uvicorn)
+After=network.target
+
+[Service]
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/srv/ai-scribe/backend
+Environment=APP_ENV=production
+Environment=AWS_SECRET_NAME=ai-scribe/production
+Environment=AWS_DEFAULT_REGION=us-east-1
+ExecStart=/srv/ai-scribe/backend/.venv/bin/gunicorn app.main:app \
+    --workers 2 \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --bind 127.0.0.1:8001 \
+    --access-logfile - \
+    --error-logfile -
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

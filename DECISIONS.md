@@ -36,6 +36,13 @@ EC2) before writing any product code.
   shell page (login placeholder + SSE test panel). Adding `react-router-dom`
   is proposed for Phase 1 (needs approval — outside the literal approved list).
 
+- **Ports (machine-specific collisions found during build)** — local dev DB
+  binds host **5433** (an orphaned `kyron-scribe-db` container from a deleted
+  earlier attempt holds 5432 on this laptop); the backend runs on **8001**
+  everywhere (another project's Django server owns 8000 locally, and using one
+  port in dev and prod keeps nginx/systemd/vite-proxy configs identical in
+  shape).
+
 ### Interfaces established
 
 - `GET /api/health` → `{status, database}` — used by the deploy runbook.
