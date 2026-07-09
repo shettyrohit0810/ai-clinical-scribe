@@ -7,7 +7,9 @@
 - Admins (dashboard, Phase 6) see all encounters.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import date
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
@@ -51,17 +53,51 @@ def get_owned_encounter(
 
 @router.get("", response_model=list[EncounterSummary])
 def list_encounters(
-    user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    # Admin-only filters (Phase 6 dashboard). provider_id is inert for
+    # non-admins: the if/elif below means a provider always falls into the
+    # isolation branch and the filter is never even consulted for them, so
+    # they always get exactly their own encounters — no leak, no matter
+    # what id they pass. That's what "extend the existing endpoint, don't
+    # duplicate the isolation rule" buys: one `if` branch, not a parallel
+    # route with its own copy of the ownership check to get wrong.
+    provider_id: int | None = Query(None),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     query = (
-        select(Encounter)
+        select(Encounter, User.full_name)
+        .join(User, User.id == Encounter.provider_id)
         .options(joinedload(Encounter.patient))
-        # Order matches ix_encounters_provider_created — single index scan.
+        # Order matches ix_encounters_provider_created — single index scan
+        # when a provider filter is present; a full unfiltered admin scan
+        # is a small-table sequential scan at this data scale (no new index
+        # added for that case — nothing to optimize yet).
         .order_by(Encounter.created_at.desc())
     )
     if user.role != UserRole.admin:
         query = query.where(Encounter.provider_id == user.id)
-    return db.scalars(query).all()
+    elif provider_id is not None:
+        query = query.where(Encounter.provider_id == provider_id)
+    if date_from is not None:
+        query = query.where(func.date(Encounter.created_at) >= date_from)
+    if date_to is not None:
+        query = query.where(func.date(Encounter.created_at) <= date_to)
+
+    rows = db.execute(query).all()
+    return [
+        EncounterSummary(
+            id=e.id,
+            patient=e.patient,
+            status=e.status,
+            created_at=e.created_at,
+            updated_at=e.updated_at,
+            provider_id=e.provider_id,
+            provider_name=provider_name,
+        )
+        for e, provider_name in rows
+    ]
 
 
 @router.post("", response_model=EncounterCreated, status_code=201)
@@ -130,12 +166,15 @@ def get_encounter(
         .order_by(NoteVersion.version_number.desc())
         .limit(1)
     )
+    provider = db.get(User, encounter.provider_id)
     return EncounterDetail(
         id=encounter.id,
         patient=encounter.patient,
         status=encounter.status,
         created_at=encounter.created_at,
         updated_at=encounter.updated_at,
+        provider_id=encounter.provider_id,
+        provider_name=provider.full_name,
         transcript=encounter.transcript,
         template_id=encounter.template_id,
         draft_note=encounter.draft_note,

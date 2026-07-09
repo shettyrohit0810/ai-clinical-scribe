@@ -7,7 +7,7 @@ mirror.
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models import EncounterStatus, UserRole
 
@@ -48,6 +48,11 @@ class EncounterSummary(BaseModel):
     status: EncounterStatus
     created_at: datetime
     updated_at: datetime
+    # Provider identity on every row (not just admin views): a provider's
+    # own list always shows their own name here too, so this is one shape
+    # for both audiences rather than an admin-only variant.
+    provider_id: int
+    provider_name: str
 
 
 class EncounterOut(EncounterSummary):
@@ -147,3 +152,82 @@ class TemplateOut(BaseModel):
     id: int
     name: str
     description: str
+
+
+# ---- Phase 6: admin dashboard -------------------------------------------------
+
+
+class ProviderOut(BaseModel):
+    """Admin-facing user shape — includes is_active/created_at that the
+    self-serve UserOut (used by /auth/me) deliberately omits."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    email: str
+    full_name: str
+    role: UserRole
+    is_active: bool
+    created_at: datetime
+
+
+class ProviderCreate(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    full_name: str = Field(min_length=1, max_length=255)
+    password: str = Field(min_length=8, max_length=200)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        # Matches the exact normalization login() queries against
+        # (User.email == body.email.lower().strip()) — a provider created
+        # with mixed-case email must still be able to log in.
+        return v.strip().lower()
+
+
+class ProviderStatusUpdate(BaseModel):
+    is_active: bool
+
+
+class TemplateAdminOut(BaseModel):
+    """Full row, including `instructions` and inactive templates — the
+    provider-facing TemplateOut deliberately hides both."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    description: str
+    instructions: str
+    is_active: bool
+    created_by: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class TemplateCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str = ""
+    instructions: str = Field(min_length=1)
+
+
+class TemplateUpdate(BaseModel):
+    """Partial update — same model_fields_set pattern as EncounterPatch:
+    only fields present in the request body are applied."""
+
+    name: str | None = None
+    description: str | None = None
+    instructions: str | None = None
+    is_active: bool | None = None
+
+
+class AuditLogEntryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    user_id: int
+    user_name: str
+    action: str
+    entity_type: str | None
+    entity_id: int | None
+    created_at: datetime
