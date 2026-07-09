@@ -5,9 +5,19 @@ block and the SPA fallback (`try_files ... /index.html`) can never shadow an
 API path.
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, FastAPI
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+# Surface app.* INFO logs (LLM call accounting, tool invocations) alongside
+# uvicorn's access log — these lines are demo evidence (e.g. the server-side
+# fetch_patient_history execution). basicConfig is a no-op if a root handler
+# already exists, so this can't double-log under gunicorn.
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
+)
 
 from app.db import get_db
 from app.routers.auth import router as auth_router

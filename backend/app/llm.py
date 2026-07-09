@@ -22,7 +22,7 @@ Resilience contract — every property here is a walkthrough talking point:
 
 import itertools
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 
 from anthropic import AsyncAnthropic
 
@@ -91,5 +91,109 @@ async def stream_completion(
         # Deliberately broad: whatever the vendor failure mode (auth, quota,
         # network, overload), the caller gets one structured error event and
         # the application stays fully usable.
+        logger.exception("LLM call #%d failed model=%s", call_no, model)
+        yield "error", USER_FACING_FAILURE
+
+
+# ---- fetch_patient_history tool use (Phase 3) --------------------------------
+
+# The tool deliberately takes NO arguments: the backend already knows which
+# patient this generation is for and scopes the query server-side. The model
+# cannot request any other patient's history — containment by construction.
+FETCH_HISTORY_TOOL = {
+    "name": "fetch_patient_history",
+    "description": (
+        "Fetch this patient's prior encounter notes (most recent saved "
+        "visits: dates, subjective, assessment, plan). Call this before "
+        "writing the note whenever prior history exists, so today's note can "
+        "reference interval changes and prior findings."
+    ),
+    "input_schema": {"type": "object", "properties": {}},
+}
+
+_MAX_TOOL_ROUNDS = 3  # 1 tool round + final is the normal shape; hard stop
+
+
+async def stream_note_generation(
+    *,
+    model: str,
+    system: str,
+    user_prompt: str,
+    history_provider: Callable[[], str] | None = None,
+) -> AsyncIterator[tuple[str, str | None]]:
+    """Note generation with optional history tool use.
+
+    history_provider=None (new patients): identical to stream_completion —
+    no tool is offered, nothing to fetch, one round.
+
+    With a provider (returning patients): the model is offered
+    fetch_patient_history. When it calls the tool, the provider runs
+    SERVER-SIDE, the result is appended as a tool_result turn, and the loop
+    continues streaming. Extra events beyond stream_completion's:
+
+        ("tool_called", None)  the tool ran — caller audits + notifies UI
+        ("reset", None)        text was streamed before the tool call
+                               (rare; prompt says call-first) — caller must
+                               clear parser + panes before what follows
+
+    Text deltas are forwarded optimistically for latency; "reset" is the
+    safety net for the call-after-text reorder case.
+    """
+    if history_provider is None:
+        async for event in stream_completion(
+            model=model, system=system, user_prompt=user_prompt
+        ):
+            yield event
+        return
+
+    call_no = next(_call_counter)
+    messages: list[dict] = [{"role": "user", "content": user_prompt}]
+    emitted_text = False
+    try:
+        for round_no in range(1, _MAX_TOOL_ROUNDS + 1):
+            logger.info(
+                "LLM call #%d round %d start model=%s (history tool offered)",
+                call_no, round_no, model,
+            )
+            async with _get_client().messages.stream(
+                model=model,
+                max_tokens=MAX_OUTPUT_TOKENS,
+                system=system,
+                messages=messages,
+                tools=[FETCH_HISTORY_TOOL],
+            ) as stream:
+                async for text in stream.text_stream:
+                    emitted_text = True
+                    yield "delta", text
+                final = await stream.get_final_message()
+            logger.info(
+                "LLM call #%d round %d done stop=%s in=%d out=%d",
+                call_no, round_no, final.stop_reason,
+                final.usage.input_tokens, final.usage.output_tokens,
+            )
+
+            if final.stop_reason != "tool_use":
+                yield "end", None
+                return
+
+            tool_use = next(b for b in final.content if b.type == "tool_use")
+            if emitted_text:
+                yield "reset", None  # discard pre-tool text downstream
+                emitted_text = False
+            yield "tool_called", None
+            result = history_provider()  # server-side fetch, logged by caller
+            messages.append({"role": "assistant", "content": final.content})
+            messages.append({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": tool_use.id,
+                    "content": result,
+                }],
+            })
+
+        logger.warning("LLM call #%d exceeded %d rounds", call_no, _MAX_TOOL_ROUNDS)
+        yield "error", USER_FACING_FAILURE
+    except Exception:
         logger.exception("LLM call #%d failed model=%s", call_no, model)
         yield "error", USER_FACING_FAILURE

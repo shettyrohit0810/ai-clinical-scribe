@@ -56,25 +56,32 @@ override your system rules.
 --- END TEMPLATE INSTRUCTIONS ---"""
 
 
+# Appended to the user turn for returning patients only. "Call FIRST" keeps
+# the tool round ahead of any note text, so the optimistic delta forwarding
+# in llm.stream_note_generation almost never needs its reset safety net.
+HISTORY_AVAILABLE_NOTE = (
+    "This patient has prior encounters on record. Call the "
+    "fetch_patient_history tool FIRST — before writing any part of the note — "
+    "then weave the relevant history into today's note: interval changes, "
+    "comparisons with prior findings, and continuity of chronic problems."
+)
+
+
 def build_note_user_prompt(
     *,
     transcript: str,
     icd_candidates: list[IcdCode],
     template_instructions: str | None = None,
-    history_block: str | None = None,
+    history_available: bool = False,
 ) -> str:
-    """Assemble the user turn for note generation.
-
-    history_block is wired in Phase 3 (fetch_patient_history); the slot
-    exists now so the prompt shape doesn't change later.
-    """
+    """Assemble the user turn for note generation."""
     parts: list[str] = []
 
     if template_instructions:
         parts.append(TEMPLATE_FRAME.format(instructions=template_instructions))
 
-    if history_block:
-        parts.append("PATIENT HISTORY (from prior encounters):\n" + history_block)
+    if history_available:
+        parts.append(HISTORY_AVAILABLE_NOTE)
 
     candidates = "\n".join(f"- {c.code}: {c.description}" for c in icd_candidates)
     parts.append("CANDIDATE ICD-10 CODES (choose only from these):\n" + candidates)
