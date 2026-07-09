@@ -10,6 +10,7 @@ import {
   type Template,
 } from "../api";
 import { useDictation } from "../useDictation";
+import { useVoiceEdit } from "../useVoiceEdit";
 
 // Debounce delay for the ICD search-as-you-type box — short enough to feel
 // live, long enough that "knee pain" doesn't fire five separate requests.
@@ -304,6 +305,21 @@ export default function Workspace() {
     onFinalRegenerate: useCallback(() => generate({ tier: "final", auto: true }), [generate]),
   });
 
+  // ---- voice editing (Web Speech API command mode + WebSocket) ----------
+  // A conversational patch, not a regeneration: each spoken command is one
+  // WS round trip, applied server-side ONLY through apply_note_patch (never
+  // written here directly). Marks the note dirty exactly like a typed pane
+  // edit does — a voice edit is the same class of explicit, must-not-be-
+  // silently-overwritten change the Phase 7 dirty guard already protects
+  // against a LATER dictation session's auto-regeneration.
+  const voiceEdit = useVoiceEdit({
+    encounterId: id!,
+    onPatchApplied: useCallback((patchedNote) => {
+      setNote((prev) => ({ ...prev, ...patchedNote }));
+      setNoteDirty(true);
+    }, []),
+  });
+
   // ---- save as version ---------------------------------------------------
   async function saveVersion() {
     await flushAutosave();
@@ -402,7 +418,11 @@ export default function Workspace() {
           <label className="flex min-h-0 flex-1 flex-col">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-slate-600">Encounter transcript</span>
-              <DictationControls dictation={dictation} />
+              {/* Mutual exclusion with voice editing: the browser only
+                  meaningfully supports one active SpeechRecognition session,
+                  and dictating INTO the transcript while voice-editing the
+                  NOTE would be an incoherent thing to do at the same time. */}
+              <DictationControls dictation={dictation} disabled={voiceEdit.state !== "idle"} />
             </div>
             <textarea
               value={transcript}
@@ -456,6 +476,32 @@ export default function Workspace() {
 
         {/* Right: SOAP panes */}
         <section className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-slate-600">SOAP note</span>
+            <VoiceEditControls
+              voiceEdit={voiceEdit}
+              disabled={dictation.state !== "idle" || gen === "streaming"}
+            />
+          </div>
+          {voiceEdit.state !== "idle" && voiceEdit.interim && (
+            <p className="text-xs italic text-slate-400">Hearing: {voiceEdit.interim}</p>
+          )}
+          {voiceEdit.processing && (
+            <p className="text-xs text-slate-400">Applying edit…</p>
+          )}
+          {!voiceEdit.processing && voiceEdit.lastHeard && voiceEdit.lastMessage && (
+            <p className="text-xs text-slate-500">
+              Heard "{voiceEdit.lastHeard}" — {voiceEdit.lastMessage}
+            </p>
+          )}
+          {voiceEdit.error && (
+            <p role="alert" className="text-xs text-red-700">{voiceEdit.error}</p>
+          )}
+          {!voiceEdit.supported && (
+            <p className="text-xs text-slate-400">
+              Voice editing isn't supported in this browser — try Chrome or Edge.
+            </p>
+          )}
           {historyReferenced !== null && (
             <div className="flex items-center gap-2 rounded border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs text-indigo-800">
               <span aria-hidden>⟲</span>
@@ -643,7 +689,13 @@ function VersionViewerModal({
   );
 }
 
-function DictationControls({ dictation }: { dictation: ReturnType<typeof useDictation> }) {
+function DictationControls({
+  dictation,
+  disabled,
+}: {
+  dictation: ReturnType<typeof useDictation>;
+  disabled?: boolean;
+}) {
   if (!dictation.supported) return null;
   return (
     <div className="flex items-center gap-2">
@@ -651,7 +703,8 @@ function DictationControls({ dictation }: { dictation: ReturnType<typeof useDict
         <button
           type="button"
           onClick={dictation.start}
-          className="text-xs font-medium text-blue-700 hover:underline"
+          disabled={disabled}
+          className="text-xs font-medium text-blue-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-300 disabled:no-underline"
         >
           ● Start dictation
         </button>
@@ -691,6 +744,71 @@ function DictationControls({ dictation }: { dictation: ReturnType<typeof useDict
           <button
             type="button"
             onClick={dictation.stop}
+            className="text-xs font-medium text-slate-600 hover:underline"
+          >
+            Stop
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function VoiceEditControls({
+  voiceEdit,
+  disabled,
+}: {
+  voiceEdit: ReturnType<typeof useVoiceEdit>;
+  disabled?: boolean;
+}) {
+  if (!voiceEdit.supported) return null;
+  return (
+    <div className="flex items-center gap-2">
+      {voiceEdit.state === "idle" && (
+        <button
+          type="button"
+          onClick={voiceEdit.start}
+          disabled={disabled}
+          className="text-xs font-medium text-blue-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-300 disabled:no-underline"
+        >
+          ● Start voice edit
+        </button>
+      )}
+      {voiceEdit.state === "listening" && (
+        <>
+          <span className="flex items-center gap-1 text-xs font-medium text-red-600">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-red-600" aria-hidden />
+            Listening…
+          </span>
+          <button
+            type="button"
+            onClick={voiceEdit.pause}
+            className="text-xs font-medium text-slate-600 hover:underline"
+          >
+            Pause
+          </button>
+          <button
+            type="button"
+            onClick={voiceEdit.stop}
+            className="text-xs font-medium text-slate-600 hover:underline"
+          >
+            Stop
+          </button>
+        </>
+      )}
+      {voiceEdit.state === "paused" && (
+        <>
+          <span className="text-xs font-medium text-amber-700">Paused</span>
+          <button
+            type="button"
+            onClick={voiceEdit.resume}
+            className="text-xs font-medium text-blue-700 hover:underline"
+          >
+            Resume
+          </button>
+          <button
+            type="button"
+            onClick={voiceEdit.stop}
             className="text-xs font-medium text-slate-600 hover:underline"
           >
             Stop

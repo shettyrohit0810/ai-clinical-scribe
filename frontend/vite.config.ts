@@ -10,6 +10,10 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": "http://127.0.0.1:8001",
+      // Voice-edit WebSocket (Phase 8) — separate target config only
+      // because it needs ws:true; same backend, same shape as prod nginx's
+      // separate /ws location block (see infra/nginx/ai-scribe.conf).
+      "/ws": { target: "http://127.0.0.1:8001", ws: true },
     },
   },
 });
