@@ -165,22 +165,38 @@ EC2) before writing any product code.
   `fetch_patient_history` mid-generation; the backend executes it and the
   loop continues (spec's preferred design; the authorized backend-side
   fallback was not needed — integration took well under the 3h budget).
-- **The tool takes NO arguments** — the backend scopes the query to the
-  encounter's patient. The model cannot name a patient or an id, so there is
-  no path to another patient's history. Containment by construction, not by
-  validation.
+- **Server-side patient scoping: the tool takes NO arguments** — the backend
+  resolves "which patient" from the encounter being generated, never from
+  model output. Rationale: any parameter (name, id) would make patient
+  selection a model decision that must then be validated against
+  authorization rules — a prompt-injection surface and a validation burden.
+  With a zero-argument tool there is nothing to validate and no path to
+  another patient's history: containment by construction, not by validation.
+  It also keeps the audit trail honest — the logged invocation is exactly
+  the query that ran.
 - **Tool offered only to returning patients** — new patients get a plain
   single-round stream. Cheaper (no tool tokens), simpler, and the
   returning-vs-new behavioral difference is architectural rather than
   prompt-dependent.
-- **Optimistic streaming + reset event** — deltas are forwarded live for
-  latency; if the model emits text before its tool call (prompt says
-  call-FIRST, so this is rare), a `reset` SSE event tells the client to
-  clear panes and the server restarts its parser. Covered by unit tests at
-  both the llm-loop and route level.
-- **History = newest 3 SAVED encounters, sections truncated** — drafts have
-  no signed note to reference; truncation keeps history from crowding out
-  the transcript in the token budget.
+- **Optimistic streaming + reset event** — the alternative was to buffer
+  round-1 output until stop_reason proves no tool call is coming, but that
+  destroys progressive rendering for every new-patient generation (the
+  common case) to guard against a rare reorder. Instead deltas forward
+  live, and the one bad case — text emitted before the tool call — is
+  handled by a `reset` SSE event (client clears panes, server restarts its
+  parser; everything after reset is authoritative). The prompt's
+  "call the tool FIRST" instruction makes reset a safety net, not a code
+  path users see. Covered by unit tests at both the llm-loop and route
+  level.
+- **History limited to the newest 3 SAVED encounters, sections truncated
+  (400 chars)** — three reasons: (1) token budget — history rides inside
+  the generation request, and unbounded history would crowd out the
+  transcript that must dominate the note; (2) clinical recency — the last
+  few visits carry the interval-change signal a follow-up note needs, while
+  a 15-visit dump buries it; (3) latency/cost — history tokens are billed
+  and re-read on the post-tool round. Drafts are excluded because they have
+  no signed note to reference. The caps are module constants
+  (history.MAX_ENCOUNTERS / MAX_SECTION_CHARS), trivially tunable.
 - **Every invocation is evidenced twice** — an `audit_log` row
   (`tool_call:fetch_patient_history`) and an app INFO log line showing
   round accounting (`stop=tool_use` → executed → `stop=end_turn`).

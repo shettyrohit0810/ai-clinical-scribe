@@ -67,6 +67,27 @@ and `GET /api/dev/stream-test` requires an authenticated session:
 - `Content-Type: text/event-stream`; `Cache-Control: no-cache`;
   `X-Accel-Buffering: no`.
 
+### History tool-call flow (returning patients only)
+
+When the encounter's patient has ≥1 prior **saved** encounter, the model is
+offered the `fetch_patient_history` tool (never for new patients — they get
+a plain single-round stream). The flow within one SSE response:
+
+1. Round 1 streams; the model calls `fetch_patient_history` (prompted to do
+   so BEFORE writing note text). The tool takes **no arguments** — the
+   backend scopes the fetch to this encounter's patient server-side.
+2. On the tool call the server: writes an `audit_log` row
+   (`tool_call:fetch_patient_history`), logs an app INFO line, emits the
+   `history` SSE event, and returns the newest 3 saved encounters
+   (subjective/assessment/plan, truncated) as the tool result.
+3. Round 2 streams the actual note as normal `section` events.
+4. If the model emitted note text before its tool call (rare), a `reset`
+   event precedes `history` — the client discards everything shown so far.
+
+Hard stop after 3 rounds → `error` event. From the client's perspective this
+is all one EventSource connection; only the extra `history`/`reset` events
+distinguish it from a plain generation.
+
 ### Event formats (all `data:` fields are JSON)
 
 | event | data | Meaning |
