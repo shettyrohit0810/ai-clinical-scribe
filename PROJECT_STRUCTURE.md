@@ -11,6 +11,9 @@ ai-scribe/
 ├── API_CONTRACTS.md          # endpoint + SSE event contract (frontend mirrors it)
 ├── DECISIONS.md              # per-phase decision log
 ├── DEMO_FAILURES.md          # <90s scripts for the 3 non-happy-path demos (Phase 9)
+├── DEMO_SCRIPT.md            # full happy-path walkthrough script (Phase 11)
+├── WALKTHROUGH_NOTES.md      # technical talking points for the walkthrough (Phase 11)
+├── FINAL_CHECKLIST.md        # pre-recording consistency audit + demo readiness checklist
 ├── backend/
 │   ├── requirements.txt      # runtime deps (approved stack)
 │   ├── requirements-dev.txt  # pytest + httpx (tests only)

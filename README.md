@@ -85,6 +85,7 @@ on Web Speech.
 | [DEMO_SCRIPT.md](DEMO_SCRIPT.md) | Full happy-path walkthrough script |
 | [DEMO_FAILURES.md](DEMO_FAILURES.md) | &lt;90s scripts for the three non-happy-path demos |
 | [WALKTHROUGH_NOTES.md](WALKTHROUGH_NOTES.md) | Talking points and anticipated questions for the technical walkthrough |
+| [FINAL_CHECKLIST.md](FINAL_CHECKLIST.md) | Pre-recording consistency audit + demo readiness checklist |
 
 ## Project layout
 
