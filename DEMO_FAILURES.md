@@ -84,9 +84,9 @@ workspace fails safe with a clear message instead of a broken/blank screen.
 **Steps (two browser sessions — e.g. one normal window, one
 incognito/private, so the two logins don't share a cookie jar):**
 1. **Window A:** log in as a provider (`sarah.chen@clinic.example` /
-   `ScribeDemo1!`) and open an encounter with a draft note.
+   `KyronDemo`) and open an encounter with a draft note.
 2. **Window B:** log in as admin (`admin@clinic.example` /
-   `ScribeDemo1!`), go to the admin dashboard's Providers tab, and click
+   `KyronDemo`), go to the admin dashboard's Providers tab, and click
    **Deactivate** on Dr. Sarah Chen.
 3. Switch back to **Window A** and wait a few seconds (the next autosave
    tick fires within 3s), or click anything that triggers a request (e.g.

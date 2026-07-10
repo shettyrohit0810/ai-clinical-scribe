@@ -94,20 +94,46 @@ export default function Login() {
           <summary className="cursor-pointer select-none text-xs font-medium text-slate-600">
             Demo accounts
           </summary>
-          <dl className="mt-2 space-y-1 text-xs">
-            <div className="flex items-center justify-between gap-3">
-              <dt className="text-slate-400">Provider</dt>
-              <dd className="font-mono text-slate-600">sarah.chen@clinic.example</dd>
+          <div className="mt-3 space-y-3 text-xs">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                Providers
+              </p>
+              <dl className="mt-1 space-y-1">
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-slate-600">Dr. Sarah Chen</dt>
+                  <dd className="font-mono text-slate-500">sarah.chen@clinic.example</dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-slate-600">Dr. James Patel</dt>
+                  <dd className="font-mono text-slate-500">james.patel@clinic.example</dd>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-slate-600">Dr. Maria Okafor</dt>
+                  <dd className="font-mono text-slate-500">maria.okafor@clinic.example</dd>
+                </div>
+              </dl>
             </div>
-            <div className="flex items-center justify-between gap-3">
-              <dt className="text-slate-400">Admin</dt>
-              <dd className="font-mono text-slate-600">admin@clinic.example</dd>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                Administrator
+              </p>
+              <dl className="mt-1 space-y-1">
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-slate-600">Alex Rivera</dt>
+                  <dd className="font-mono text-slate-500">admin@clinic.example</dd>
+                </div>
+              </dl>
             </div>
-            <div className="flex items-center justify-between gap-3">
-              <dt className="text-slate-400">Password</dt>
-              <dd className="font-mono text-slate-600">ScribeDemo1!</dd>
+            <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                Password
+              </span>
+              <code className="rounded border border-blue-200 bg-blue-50 px-2 py-0.5 font-mono text-blue-700">
+                KyronDemo
+              </code>
             </div>
-          </dl>
+          </div>
         </details>
       </div>
     </div>

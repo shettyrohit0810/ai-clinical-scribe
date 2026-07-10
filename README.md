@@ -142,7 +142,7 @@ progressive-streaming infrastructure check from Phase 0.
 
 ## Seeded logins
 
-All demo accounts use password `ScribeDemo1!` (demo stage props, not
+All demo accounts use password `KyronDemo` (demo stage props, not
 secrets). Seed data is deliberately shaped for the demo: Margaret Thompson
 has three prior saved encounters across two providers, making her the
 returning-patient / history-injection demo case.

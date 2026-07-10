@@ -22,7 +22,7 @@ from app.auth import hash_password
 from app.db import SessionLocal
 from app.models import Encounter, EncounterStatus, NoteVersion, Patient, User, UserRole
 
-DEMO_PASSWORD = "ScribeDemo1!"  # demo stage prop — listed in README on purpose
+DEMO_PASSWORD = "KyronDemo"  # demo stage prop — listed in README on purpose
 
 USERS = [
     ("sarah.chen@clinic.example", "Dr. Sarah Chen", UserRole.provider),

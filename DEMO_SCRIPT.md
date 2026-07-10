@@ -31,7 +31,7 @@ the feature actually works — not just that a button was clicked.
 ## 1. Login (~15s)
 
 Go to `http://localhost:5173`. Sign in as `sarah.chen@clinic.example` /
-`ScribeDemo1!`.
+`KyronDemo`.
 
 *Say:* JWT in an httpOnly cookie — never touches JavaScript. Provider data
 is isolated server-side; a provider only ever sees their own encounters.
@@ -165,7 +165,7 @@ backend endpoint.
 
 ## 11. Admin dashboard (~60s)
 
-Log out, log in as `admin@clinic.example` / `ScribeDemo1!`. Go to Admin.
+Log out, log in as `admin@clinic.example` / `KyronDemo`. Go to Admin.
 
 - **Encounters tab** — filter by provider and date range; point out this
   is the SAME endpoint providers use, just with admin-only query params.
