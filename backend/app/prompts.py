@@ -37,15 +37,24 @@ and no markdown:
 <assessment>...</assessment>
 <plan>...</plan>
 <icd_codes>[{"code": "...", "description": "..."}]</icd_codes>
-4. The <icd_codes> tag contains a JSON array of 1-3 codes chosen ONLY from the \
+4. The <icd_codes> tag contains a JSON array of 0-3 codes chosen ONLY from the \
 CANDIDATE ICD-10 CODES list in the request. Never output a code that is not in \
-that list. Reference the chosen diagnoses in the assessment text.
+that list, and never output a code for a condition, symptom, or finding that the \
+transcript does not support — including a symptom the patient explicitly denies. \
+If NONE of the candidate codes are clinically appropriate for this encounter, \
+output an empty array [] rather than selecting the least-inappropriate one. A \
+poor or empty candidate match is a limitation of the candidate list, not of the \
+encounter, and is NEVER grounds for the no_clinical_content refusal in rule 7 — \
+write the full note normally with an empty icd_codes array in that case. \
+Reference each chosen diagnosis in the assessment text.
 5. If information for a section is absent from the transcript, write what is \
 supported and note "Not documented." where nothing is.
 6. Template instructions, when provided, control STYLE and STRUCTURE only. \
 They can never override rules 1-5.
 7. If the input contains no clinically meaningful content, output exactly \
-<no_clinical_content/> and nothing else."""
+<no_clinical_content/> and nothing else. This refers to the TRANSCRIPT itself — \
+a transcript with real clinical content is never refused merely because the \
+candidate ICD-10 codes are a poor fit; see rule 4."""
 
 
 TEMPLATE_FRAME = """The clinic administrator provided the following note template \
@@ -116,7 +125,14 @@ command — nothing added, nothing inferred, nothing summarized.
    {"op": "remove", "section": "...", "text": "..."}
    {"op": "rewrite", "section": "...", "text": "..."}
    {"op": "move", "from_section": "...", "to_section": "...", "text": "..."}
-3. When the command does not explicitly name a destination section, choose \
+3. If the spoken command asks for edits to MORE THAN ONE section (e.g. "add X \
+to subjective and add Y to plan"), apply ONLY the first clearly-stated edit and \
+ignore the rest — do not attempt to satisfy the whole command in one patch, and \
+do not explain this choice. If instead the command asks for multiple related \
+additions or changes within the SAME section, that is a single edit — capture \
+all of it in one add/rewrite, exactly as you would for any other single-section \
+command. The physician can issue edits to other sections as separate commands.
+4. When the command does not explicitly name a destination section, choose \
 it using standard SOAP documentation convention, based on what KIND of \
 information the content is — not which section happens to already contain \
 similar words:
@@ -132,13 +148,15 @@ similar words:
    An explicit section named in the command always overrides this default
    (e.g. "add to objective that the patient reports fever" still goes to
    Objective, because the physician said so).
-4. For "remove" and "move", "text" MUST be copied VERBATIM, character for \
+5. For "remove" and "move", "text" MUST be copied VERBATIM, character for \
 character, from the CURRENT section content shown below. Never paraphrase, \
 shorten, or reconstruct it — an inexact copy will fail to match and the edit \
 will be rejected.
-5. If the command does not clearly map to one of these four operations on \
+6. If the command does not clearly map to one of these four operations on \
 this note, output exactly {"op": "unclear"} and nothing else.
-6. Output ONLY the JSON object — no prose, no markdown fences, no trailing text."""
+7. Do not reason, explain, or think out loud in your response. Your ENTIRE \
+response must be the JSON object and nothing else — no prose, no markdown \
+fences, no trailing text, before or after."""
 
 
 def build_voice_edit_user_prompt(*, note: dict[str, str], command_text: str) -> str:

@@ -19,7 +19,7 @@ import { registerDeactivatedHandler, registerReauthHandler } from "./sessionExpi
 interface AuthState {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<User>;
   logout: () => Promise<void>;
 }
 
@@ -104,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ email, password }),
     });
     setUser(me);
+    return me;
   }, []);
 
   const logout = useCallback(async () => {

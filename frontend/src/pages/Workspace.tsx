@@ -10,6 +10,7 @@ import {
   type NoteVersionSummary,
   type Template,
 } from "../api";
+import { useAuth } from "../auth";
 import { useDictation } from "../useDictation";
 import { useVoiceEdit } from "../useVoiceEdit";
 import { wordDiff } from "../diff";
@@ -23,6 +24,18 @@ type SectionName = (typeof SECTIONS)[number];
 type NoteText = Record<SectionName, string>;
 
 const EMPTY_NOTE: NoteText = { subjective: "", objective: "", assessment: "", plan: "" };
+
+// Shared control styling for dictation/voice-edit start-stop-pause buttons
+// and their listening/paused status pills — one recipe so the two control
+// groups can't drift into different sizes over time.
+const CONTROL_BTN_PRIMARY =
+  "rounded border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-transparent disabled:text-slate-300";
+const CONTROL_BTN_SECONDARY =
+  "rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50";
+const STATUS_PILL_RED =
+  "flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700";
+const STATUS_PILL_AMBER =
+  "rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700";
 
 type GenState = "idle" | "streaming" | "done" | "empty" | "error";
 type SaveState = "clean" | "dirty" | "saving" | "saved";
@@ -40,6 +53,7 @@ type SaveState = "clean" | "dirty" | "saving" | "saved";
  */
 export default function Workspace() {
   const { id } = useParams();
+  const { user } = useAuth();
   const location = useLocation();
   const routeState = location.state as
     | { returning?: boolean; priorEncounters?: number }
@@ -414,30 +428,36 @@ export default function Workspace() {
     <div className="min-h-screen">
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-y-2 px-4 py-3 sm:px-6">
-          <div className="flex flex-wrap items-center gap-3">
-            <Link to="/" className="text-xs text-blue-700 hover:underline">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <Link
+              to={user?.role === "admin" ? "/admin" : "/"}
+              className="text-xs text-slate-400 hover:text-blue-700 hover:underline"
+            >
               ← Encounters
             </Link>
-            <h1 className="text-sm font-semibold text-slate-900">
+            <h1 className="text-base font-semibold tracking-tight text-slate-900">
               {p.last_name}, {p.first_name}
             </h1>
-            <span className="hidden text-xs text-slate-500 sm:inline">DOB {p.dob}</span>
-            <span
-              className={
-                detail.status === "saved"
-                  ? "rounded bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700"
-                  : "rounded bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700"
-              }
-            >
-              {detail.status}
-              {savedVersion ? ` · v${savedVersion}` : ""}
-            </span>
+            <div className="flex items-center gap-1.5 text-xs text-slate-500">
+              <span>DOB {p.dob}</span>
+              <span aria-hidden className="text-slate-300">·</span>
+              <span
+                className={
+                  detail.status === "saved"
+                    ? "rounded bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700"
+                    : "rounded bg-amber-50 px-1.5 py-0.5 font-medium text-amber-700"
+                }
+              >
+                {detail.status}
+                {savedVersion ? ` · v${savedVersion}` : ""}
+              </span>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             {saveError && (
-              <span role="alert" className="text-xs text-red-700">{saveError}</span>
+              <span role="alert" className="text-xs font-medium text-red-700">{saveError}</span>
             )}
-            <span className="text-xs text-slate-400">
+            <span className="text-xs text-slate-500">
               {saveState === "saving" && "Saving…"}
               {saveState === "saved" && "All changes saved"}
               {saveState === "dirty" && "Unsaved changes"}
@@ -445,7 +465,7 @@ export default function Workspace() {
             <button
               onClick={saveVersion}
               disabled={noteIsEmpty || gen === "streaming" || versionSaving}
-              className="rounded bg-emerald-700 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-800 disabled:bg-slate-300"
+              className="rounded bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:bg-slate-300"
             >
               {versionSaving ? "Saving…" : "Save note"}
             </button>
@@ -470,28 +490,30 @@ export default function Workspace() {
 
         {/* Left: transcript */}
         <section className="flex flex-col gap-3">
-          <label className="block">
-            <span className="text-xs font-medium text-slate-600">Template</span>
-            <select
-              value={templateId ?? ""}
-              onChange={(e) => setTemplateId(e.target.value ? Number(e.target.value) : null)}
-              className="mt-1 w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm"
-            >
-              <option value="">No template</option>
-              {templates.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
-          </label>
-          <label className="flex min-h-0 flex-1 flex-col">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-slate-600">Encounter transcript</span>
+          <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-slate-200 bg-white focus-within:border-blue-300">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                Encounter transcript
+              </span>
               {/* Mutual exclusion with voice editing: the browser only
                   meaningfully supports one active SpeechRecognition session,
                   and dictating INTO the transcript while voice-editing the
                   NOTE would be an incoherent thing to do at the same time. */}
               <DictationControls dictation={dictation} disabled={voiceEdit.state !== "idle"} />
             </div>
+            <label className="flex items-center gap-2 border-b border-slate-100 px-3 py-2 text-xs text-slate-500">
+              Template
+              <select
+                value={templateId ?? ""}
+                onChange={(e) => setTemplateId(e.target.value ? Number(e.target.value) : null)}
+                className="rounded border border-slate-300 bg-white px-2 py-1 text-xs focus:border-blue-600 focus:outline-none"
+              >
+                <option value="">No template</option>
+                {templates.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </label>
             <textarea
               value={transcript}
               onChange={(e) => setTranscript(e.target.value)}
@@ -504,23 +526,27 @@ export default function Workspace() {
               // the next finalized chunk appends after whatever the buffer
               // currently holds, dictated or typed.
               placeholder="Paste or type the encounter transcript, or start dictation…"
-              className="mt-1 min-h-[24rem] flex-1 resize-y rounded border border-slate-300 bg-white p-3 font-mono text-sm leading-relaxed focus:border-blue-600 focus:outline-none"
+              className="min-h-[22rem] flex-1 resize-y bg-transparent p-3 font-mono text-sm leading-relaxed focus:outline-none"
             />
-            {dictation.state === "listening" && dictation.interim && (
-              <p className="mt-1 text-xs italic text-slate-400">
-                Hearing: {dictation.interim}
-              </p>
+            {(dictation.interim || dictation.error || !dictation.supported) && (
+              <div className="border-t border-slate-100 px-3 py-2">
+                {dictation.state === "listening" && dictation.interim && (
+                  <p className="text-xs italic text-slate-400">
+                    Hearing: {dictation.interim}
+                  </p>
+                )}
+                {dictation.error && (
+                  <p role="alert" className="text-xs text-red-700">{dictation.error}</p>
+                )}
+                {!dictation.supported && (
+                  <p className="text-xs text-slate-400">
+                    Voice dictation isn't supported in this browser — try Chrome or Edge.
+                    Typed and pasted transcripts work as usual.
+                  </p>
+                )}
+              </div>
             )}
-            {dictation.error && (
-              <p role="alert" className="mt-1 text-xs text-red-700">{dictation.error}</p>
-            )}
-            {!dictation.supported && (
-              <p className="mt-1 text-xs text-slate-400">
-                Voice dictation isn't supported in this browser — try Chrome or Edge.
-                Typed and pasted transcripts work as usual.
-              </p>
-            )}
-          </label>
+          </div>
           <button
             onClick={() => generate()}
             disabled={gen === "streaming"}
@@ -545,7 +571,9 @@ export default function Workspace() {
         {/* Right: SOAP panes */}
         <section className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-600">SOAP note</span>
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+              SOAP note
+            </span>
             <VoiceEditControls
               voiceEdit={voiceEdit}
               disabled={dictation.state !== "idle" || gen === "streaming"}
@@ -589,32 +617,35 @@ export default function Workspace() {
               "Generate note" again.
             </div>
           )}
-          {SECTIONS.map((section) => (
-            <SoapPane
-              key={section}
-              name={section}
-              value={note[section]}
-              streaming={gen === "streaming"}
-              onChange={(v) => {
-                setNote((prev) => ({ ...prev, [section]: v }));
-                setNoteDirty(true);
-              }}
-            />
-          ))}
+          <div className="flex flex-col gap-2">
+            {SECTIONS.map((section) => (
+              <SoapPane
+                key={section}
+                name={section}
+                value={note[section]}
+                streaming={gen === "streaming"}
+                onChange={(v) => {
+                  setNote((prev) => ({ ...prev, [section]: v }));
+                  setNoteDirty(true);
+                }}
+              />
+            ))}
+          </div>
           {icdCodes.length > 0 && (
             <div className="rounded-lg border border-slate-200 bg-white p-3">
-              <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-600">
                 ICD-10 codes
               </span>
-              <div className="mt-2 flex flex-wrap gap-2">
+              <div className="mt-2 flex flex-wrap gap-1.5">
                 {icdCodes.map((c) => (
                   <span
                     key={c.code}
                     title={c.description}
-                    className="rounded bg-slate-100 px-2 py-1 font-mono text-xs text-slate-700"
+                    className="rounded border border-slate-200 bg-slate-50 px-2.5 py-1 font-mono text-xs text-slate-700"
                   >
                     {c.code}
-                    <span className="ml-1 font-sans text-slate-500">{c.description}</span>
+                    <span aria-hidden className="mx-1 text-slate-300">·</span>
+                    <span className="font-sans text-slate-500">{c.description}</span>
                   </span>
                 ))}
               </div>
@@ -687,13 +718,13 @@ function VersionHistoryPanel({
               tabIndex={0}
               role="button"
               aria-label={`View version ${v.version_number}, saved by ${v.saved_by_name}`}
-              className="cursor-pointer border-b border-slate-50 last:border-0 hover:bg-slate-50 focus:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
+              className="group cursor-pointer border-b border-slate-50 transition-colors last:border-0 hover:bg-slate-50 focus:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
             >
-              <td className="px-3 py-2 font-mono text-xs text-slate-500">
+              <td className="border-l-2 border-l-transparent py-2.5 pl-3 pr-3 font-mono text-xs text-slate-500 transition-colors group-hover:border-l-blue-600">
                 v{v.version_number}
               </td>
-              <td className="px-3 py-2 text-slate-700">{v.saved_by_name}</td>
-              <td className="px-3 py-2 text-right text-xs text-slate-500">
+              <td className="px-3 py-2.5 font-medium text-slate-800">{v.saved_by_name}</td>
+              <td className="px-3 py-2.5 text-right text-xs text-slate-500">
                 {new Date(v.saved_at).toLocaleString(undefined, {
                   dateStyle: "medium",
                   timeStyle: "short",
@@ -747,18 +778,22 @@ function VersionViewerModal({
         className="max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-          <h2 className="text-sm font-semibold text-slate-900">
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">
+          <h2 className="text-base font-semibold text-slate-900">
             {version ? `Version ${version.version_number}` : "Version"}
           </h2>
-          <button onClick={onClose} className="text-sm text-slate-400 hover:text-slate-600">
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+          >
             ✕
           </button>
         </div>
 
         {version && otherVersions.length > 0 && (
-          <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-2">
-            <label className="flex items-center gap-2 text-xs text-slate-500">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-5 py-2.5">
+            <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
               Compare to
               <select
                 value={compareVersionNumber ?? ""}
@@ -777,15 +812,21 @@ function VersionViewerModal({
             </label>
             {compareLoading && <span className="text-xs text-slate-400">Loading…</span>}
             {compareVersion && !compareLoading && (
-              <span className="text-xs text-slate-400">
-                additions <ins className="bg-emerald-100 px-0.5 text-emerald-800">green</ins>
-                {" · "}removals <del className="bg-red-100 px-0.5 text-red-700">red</del>
-              </span>
+              <div className="flex items-center gap-3 text-xs text-slate-500">
+                <span className="flex items-center gap-1.5">
+                  <span aria-hidden className="h-2 w-2 rounded-sm bg-emerald-200" />
+                  Added
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span aria-hidden className="h-2 w-2 rounded-sm bg-red-200" />
+                  Removed
+                </span>
+              </div>
             )}
           </div>
         )}
 
-        <div className="space-y-4 p-4">
+        <div className="space-y-4 p-5">
           {error && (
             <p role="alert" className="text-sm text-red-700">
               Could not load this version — try again.
@@ -799,32 +840,35 @@ function VersionViewerModal({
               Could not load the comparison version — try a different one.
             </p>
           )}
-          {version &&
-            SECTIONS.map((section) => (
-              <div key={section}>
-                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {section}
-                </span>
-                {compareVersion ? (
-                  <DiffText oldText={compareVersion[section]} newText={version[section]} />
-                ) : (
-                  <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
-                    {version[section] || "—"}
-                  </p>
-                )}
-              </div>
-            ))}
-          {version && version.icd_codes.length > 0 && (
-            <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3">
-              {version.icd_codes.map((c) => (
-                <span
-                  key={c.code}
-                  title={c.description}
-                  className="rounded bg-slate-100 px-2 py-1 font-mono text-xs text-slate-700"
-                >
-                  {c.code}
-                </span>
+          {version && (
+            <div>
+              {SECTIONS.map((section, i) => (
+                <div key={section} className={i === 0 ? "" : "mt-5 border-t border-slate-100 pt-5"}>
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    {section}
+                  </span>
+                  {compareVersion ? (
+                    <DiffText oldText={compareVersion[section]} newText={version[section]} />
+                  ) : (
+                    <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+                      {version[section] || "—"}
+                    </p>
+                  )}
+                </div>
               ))}
+              {version.icd_codes.length > 0 && (
+                <div className="mt-5 flex flex-wrap gap-1.5 border-t border-slate-100 pt-5">
+                  {version.icd_codes.map((c) => (
+                    <span
+                      key={c.code}
+                      title={c.description}
+                      className="rounded border border-slate-200 bg-slate-50 px-2.5 py-1 font-mono text-xs text-slate-700"
+                    >
+                      {c.code}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -836,25 +880,25 @@ function VersionViewerModal({
 function DiffText({ oldText, newText }: { oldText: string; newText: string }) {
   if (oldText === newText) {
     return (
-      <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+      <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
         {newText || "—"}
       </p>
     );
   }
   const tokens = wordDiff(oldText, newText);
   return (
-    <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+    <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
       {tokens.map((t, i) => {
         if (t.type === "same") return <span key={i}>{t.text}</span>;
         if (t.type === "added") {
           return (
-            <ins key={i} className="bg-emerald-100 text-emerald-800">
+            <ins key={i} className="rounded-sm bg-emerald-100/60 text-slate-800 no-underline">
               {t.text}
             </ins>
           );
         }
         return (
-          <del key={i} className="bg-red-100 text-red-700">
+          <del key={i} className="rounded-sm bg-red-100/60 text-slate-600 line-through decoration-red-300">
             {t.text}
           </del>
         );
@@ -872,54 +916,38 @@ function DictationControls({
 }) {
   if (!dictation.supported) return null;
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1.5">
       {dictation.state === "idle" && (
         <button
           type="button"
           onClick={dictation.start}
           disabled={disabled}
-          className="text-xs font-medium text-blue-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-300 disabled:no-underline"
+          className={CONTROL_BTN_PRIMARY}
         >
-          ● Start dictation
+          Start dictation
         </button>
       )}
       {dictation.state === "listening" && (
         <>
-          <span className="flex items-center gap-1 text-xs font-medium text-red-600">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-red-600" aria-hidden />
+          <span className={STATUS_PILL_RED}>
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-600" aria-hidden />
             Listening…
           </span>
-          <button
-            type="button"
-            onClick={dictation.pause}
-            className="text-xs font-medium text-slate-600 hover:underline"
-          >
+          <button type="button" onClick={dictation.pause} className={CONTROL_BTN_SECONDARY}>
             Pause
           </button>
-          <button
-            type="button"
-            onClick={dictation.stop}
-            className="text-xs font-medium text-slate-600 hover:underline"
-          >
+          <button type="button" onClick={dictation.stop} className={CONTROL_BTN_SECONDARY}>
             Stop
           </button>
         </>
       )}
       {dictation.state === "paused" && (
         <>
-          <span className="text-xs font-medium text-amber-700">Paused</span>
-          <button
-            type="button"
-            onClick={dictation.resume}
-            className="text-xs font-medium text-blue-700 hover:underline"
-          >
+          <span className={STATUS_PILL_AMBER}>Paused</span>
+          <button type="button" onClick={dictation.resume} className={CONTROL_BTN_PRIMARY}>
             Resume
           </button>
-          <button
-            type="button"
-            onClick={dictation.stop}
-            className="text-xs font-medium text-slate-600 hover:underline"
-          >
+          <button type="button" onClick={dictation.stop} className={CONTROL_BTN_SECONDARY}>
             Stop
           </button>
         </>
@@ -937,54 +965,38 @@ function VoiceEditControls({
 }) {
   if (!voiceEdit.supported) return null;
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1.5">
       {voiceEdit.state === "idle" && (
         <button
           type="button"
           onClick={voiceEdit.start}
           disabled={disabled}
-          className="text-xs font-medium text-blue-700 hover:underline disabled:cursor-not-allowed disabled:text-slate-300 disabled:no-underline"
+          className={CONTROL_BTN_PRIMARY}
         >
-          ● Start voice edit
+          Start voice edit
         </button>
       )}
       {voiceEdit.state === "listening" && (
         <>
-          <span className="flex items-center gap-1 text-xs font-medium text-red-600">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-red-600" aria-hidden />
+          <span className={STATUS_PILL_RED}>
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-600" aria-hidden />
             Listening…
           </span>
-          <button
-            type="button"
-            onClick={voiceEdit.pause}
-            className="text-xs font-medium text-slate-600 hover:underline"
-          >
+          <button type="button" onClick={voiceEdit.pause} className={CONTROL_BTN_SECONDARY}>
             Pause
           </button>
-          <button
-            type="button"
-            onClick={voiceEdit.stop}
-            className="text-xs font-medium text-slate-600 hover:underline"
-          >
+          <button type="button" onClick={voiceEdit.stop} className={CONTROL_BTN_SECONDARY}>
             Stop
           </button>
         </>
       )}
       {voiceEdit.state === "paused" && (
         <>
-          <span className="text-xs font-medium text-amber-700">Paused</span>
-          <button
-            type="button"
-            onClick={voiceEdit.resume}
-            className="text-xs font-medium text-blue-700 hover:underline"
-          >
+          <span className={STATUS_PILL_AMBER}>Paused</span>
+          <button type="button" onClick={voiceEdit.resume} className={CONTROL_BTN_PRIMARY}>
             Resume
           </button>
-          <button
-            type="button"
-            onClick={voiceEdit.stop}
-            className="text-xs font-medium text-slate-600 hover:underline"
-          >
+          <button type="button" onClick={voiceEdit.stop} className={CONTROL_BTN_SECONDARY}>
             Stop
           </button>
         </>
@@ -1056,7 +1068,7 @@ function SoapPane({
   onChange: (v: string) => void;
 }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white">
+    <div className="rounded-lg border border-slate-200 bg-white transition-colors focus-within:border-blue-300">
       <div className="flex items-center justify-between border-b border-slate-100 px-3 py-1.5">
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-600">
           {name}

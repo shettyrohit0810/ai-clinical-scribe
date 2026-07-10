@@ -18,7 +18,7 @@ export default function AdminDashboard() {
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
           <div className="flex items-center gap-3">
-            <Link to="/" className="text-lg font-semibold tracking-tight text-slate-900">
+            <Link to="/admin" className="text-lg font-semibold tracking-tight text-slate-900">
               AI Clinical Scribe
             </Link>
             <span className="rounded bg-slate-800 px-2 py-0.5 text-xs font-medium text-white">Admin</span>

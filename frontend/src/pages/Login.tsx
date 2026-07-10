@@ -16,8 +16,8 @@ export default function Login() {
     setError(null);
     setBusy(true);
     try {
-      await login(email, password);
-      navigate("/", { replace: true });
+      const me = await login(email, password);
+      navigate(me.role === "admin" ? "/admin" : "/", { replace: true });
     } catch (err) {
       // Backend messages are already user-appropriate ("Invalid email or
       // password", "Account deactivated") — show them verbatim.
