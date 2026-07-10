@@ -127,9 +127,21 @@ error, which is why step 12's smoke test generates a real note.
 ssh -i ~/ai-scribe.pem ubuntu@SCRIBE_HOST
 
 # Ubuntu 24.04 ships Python 3.12 — matches local dev exactly.
-# awscli is only used by step 12's RDS-privacy verification.
 sudo apt update && sudo apt install -y \
-  python3.12-venv nginx certbot python3-certbot-nginx git awscli
+  python3.12-venv nginx certbot python3-certbot-nginx git
+
+# AWS CLI v2, via the official installer — NOT `apt install awscli`. Ubuntu
+# dropped the apt `awscli` package (the old Python-2-era v1 build) from its
+# repos as of 24.04 (Noble); `apt install awscli` fails there with "has no
+# installation candidate." Confirmed by `apt-cache search awscli` returning
+# nothing. This is also AWS's own currently-supported install method (v1 is
+# deprecated). Only used by step 12's RDS-privacy verification — the app
+# itself talks to Secrets Manager via boto3, not this CLI.
+curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+sudo apt install -y unzip
+unzip -q awscliv2.zip
+sudo ./aws/install
+rm -rf awscliv2.zip aws/
 
 # Node 20 LTS (build-only; Node never runs in production)
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
