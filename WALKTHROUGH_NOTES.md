@@ -195,7 +195,7 @@ the fix didn't overcorrect.
   trickiest cases (char-by-char tag splitting, sequential chained patches,
   case-sensitive verbatim matching, repeated-substring removal) are fast
   deterministic unit tests, not slow round-trips through a mocked LLM.
-- **136 backend tests, 0 skipped, checked after every phase.** No frontend
+- **137 backend tests, 0 skipped, checked after every phase.** No frontend
   unit-test framework was added; frontend correctness was verified via
   `tsc --noEmit` plus live browser verification for every UI-facing
   change.

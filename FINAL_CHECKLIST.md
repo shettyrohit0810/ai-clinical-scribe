@@ -59,11 +59,12 @@ microphone/speaker hardware):
 
 ## Automated test count
 
-**136 backend tests, 136 passing, 0 skipped** (verified live immediately
-before writing this checklist: `pytest tests/ -q`). Breakdown: auth,
+**137 backend tests, 137 passing, 0 skipped** (re-verified live after the
+post-review fixes: `pytest tests/ -q`). Breakdown: auth,
 isolation, stream parsing (char-by-char fuzzed), encounter flow, note
 generation (mocked LLM), ICD ranking + search, patient history + tool use,
-LLM tool loop, versioning, four admin suites, the voice-edit patch engine
+LLM tool loop, versioning (incl. concurrent double-save → 409), four admin
+suites, the voice-edit patch engine
 (43 pure unit tests), the voice-edit WebSocket route (16 tests), and a
 three-scenario multi-router integration suite. No frontend unit-test
 framework; frontend correctness is `tsc --noEmit` (clean) plus the live
@@ -83,7 +84,9 @@ browser verification above.
 ## Demo readiness checklist
 
 - [ ] Fresh `python -m app.seed` run (idempotent) so Margaret Thompson's
-      returning-patient history and the three templates are in place.
+      returning-patient history and the three templates are in place, and
+      `python -m app.seed_icd` (idempotent) so the 289-code ICD catalog
+      backs generation candidates and the search widget.
 - [ ] Backend and frontend dev servers both running; backend restarted
       after any `.env` or router change (no `--reload`).
 - [ ] **Chrome**, microphone permission pre-granted.
@@ -101,7 +104,7 @@ Checked immediately before writing this file: every endpoint in
 API_CONTRACTS.md cross-referenced against the actual `@router` decorators
 in `backend/app/routers/`; the full file tree in PROJECT_STRUCTURE.md
 diffed against `find` output for `backend/app`, `backend/tests`, and
-`frontend/src`; the 289-code ICD catalog count and the 136-test count
+`frontend/src`; the 289-code ICD catalog count and the 137-test count
 independently re-verified against the running system rather than recalled;
 every doc-to-doc cross-reference (DECISIONS.md ⇄ API_CONTRACTS.md section
 names) resolved to a real heading; `git status` clean with no stash and no

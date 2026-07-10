@@ -76,6 +76,24 @@ export function useVoiceEdit(opts: UseVoiceEditOptions) {
     socketRef.current = null;
   }
 
+  // The one exit for a session whose socket died under it. Leaving the mic
+  // in "listening" over a dead socket is the silent-command-drop trap: the
+  // indicator says the assistant is listening while every utterance goes
+  // nowhere. Instead: stop recognition, drop to idle, and say why — the
+  // provider clicks Start to get a fresh connection. Captures only refs and
+  // setState functions, so closing over the first-render instance (via the
+  // useMemo'd handlers below) is safe.
+  function failSession(message: string) {
+    hadErrorRef.current = true; // block onEnd's auto-restart of recognition
+    providerRef.current.stop();
+    setInterim("");
+    setProcessing(false);
+    setState("idle");
+    setError(message);
+    clearSocket();
+    if (typeof window.speechSynthesis !== "undefined") window.speechSynthesis.cancel();
+  }
+
   function connectSocket() {
     clearSocket();
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -100,8 +118,16 @@ export function useVoiceEdit(opts: UseVoiceEditOptions) {
       }
     };
     ws.onclose = () => {
+      // clearSocket() nulls this handler before every intentional close
+      // (stop(), reconnect, unmount), so reaching here means the connection
+      // died on its own — a network blip, a server restart, or the proxy's
+      // idle read timeout severing a quiet session. If the session is still
+      // active, fail it loudly rather than keep "listening" over nothing.
       setProcessing(false);
       socketRef.current = null;
+      if (stateRef.current !== "idle") {
+        failSession("Voice edit connection lost. Start again to continue.");
+      }
     };
     ws.onerror = () => {
       setError("Voice edit connection lost. Try Start again.");
@@ -122,10 +148,17 @@ export function useVoiceEdit(opts: UseVoiceEditOptions) {
         interruptSpeech();
         setLastHeard(command);
         const ws = socketRef.current;
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          setProcessing(true);
-          ws.send(JSON.stringify({ type: "command", text: command }));
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          // Never silently drop a spoken command: if the socket is gone (or
+          // still connecting after a blip), tell the provider exactly which
+          // command was NOT applied and end the session cleanly.
+          failSession(
+            `Voice edit connection lost — "${command}" was not applied. Start again to continue.`,
+          );
+          return;
         }
+        setProcessing(true);
+        ws.send(JSON.stringify({ type: "command", text: command }));
       },
       onError: (message) => {
         setError(message);

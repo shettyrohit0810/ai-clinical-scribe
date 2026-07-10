@@ -69,6 +69,12 @@ export default function Workspace() {
   const [saveState, setSaveState] = useState<SaveState>("clean");
   const [savedVersion, setSavedVersion] = useState<number | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // In-flight guard for "Save note" — distinct from `saveState`, which
+  // tracks the background autosave. Disables the button so a double-click
+  // can't fire two concurrent version saves (the backend's UNIQUE
+  // constraint would make the loser a 409, and sequential re-clicks would
+  // write pointless duplicate versions).
+  const [versionSaving, setVersionSaving] = useState(false);
   const [showBanner, setShowBanner] = useState(routeState?.returning ?? false);
 
   // ICD-10 search widget — separate from `icdCodes` (the model-selected,
@@ -194,6 +200,10 @@ export default function Workspace() {
         ? `${prev.assessment}\n${c.code}: ${c.description}`
         : `${c.code}: ${c.description}`,
     }));
+    // Same class of explicit manual edit as typing in a pane or a voice
+    // edit: without this, an active dictation session's next rolling
+    // regeneration would silently overwrite the just-appended code.
+    setNoteDirty(true);
   }
 
   // ---- autosave (debounced ~3s) ----------------------------------------
@@ -365,6 +375,8 @@ export default function Workspace() {
   // exact same request transparently before this catch could ever see the
   // session-expiry case at all.
   async function saveVersion() {
+    if (versionSaving) return; // belt-and-suspenders with the disabled button
+    setVersionSaving(true);
     setSaveError(null);
     try {
       await flushAutosave();
@@ -377,6 +389,11 @@ export default function Workspace() {
       refreshVersions();
     } catch (err) {
       setSaveError(err instanceof ApiError ? err.message : "Could not save — try again.");
+      // A 409 means another save (other tab/device) won the race — the
+      // history panel should show that winner rather than stay stale.
+      if (err instanceof ApiError && err.status === 409) refreshVersions();
+    } finally {
+      setVersionSaving(false);
     }
   }
 
@@ -427,10 +444,10 @@ export default function Workspace() {
             </span>
             <button
               onClick={saveVersion}
-              disabled={noteIsEmpty || gen === "streaming"}
+              disabled={noteIsEmpty || gen === "streaming" || versionSaving}
               className="rounded bg-emerald-700 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-800 disabled:bg-slate-300"
             >
-              Save note
+              {versionSaving ? "Saving…" : "Save note"}
             </button>
           </div>
         </div>

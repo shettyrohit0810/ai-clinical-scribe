@@ -125,8 +125,11 @@ Seed demo data and run tests:
 ```bash
 cd backend
 .venv/bin/python -m app.seed        # idempotent demo data
+.venv/bin/python -m app.seed_icd    # 289-code ICD-10 catalog (idempotent) —
+                                    # required: generation candidates and the
+                                    # search widget both read this table
 .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest tests/   # 136 tests: unit + route + WS + multi-router integration
+.venv/bin/python -m pytest tests/   # 137 tests: unit + route + WS + multi-router integration
 ```
 
 ```bash

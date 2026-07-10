@@ -63,18 +63,24 @@ demo in the walkthrough.
 {
   "DATABASE_URL": "postgresql+psycopg://scribe_admin:<MASTER_PASSWORD>@<RDS_ENDPOINT>:5432/scribe",
   "APP_ENV": "production",
-  "JWT_SECRET": "<output of: openssl rand -hex 32>"
+  "JWT_SECRET": "<output of: openssl rand -hex 32>",
+  "ANTHROPIC_API_KEY": "<your Anthropic API key — console.anthropic.com>"
 }
 ```
 
-The app refuses to start in production if `JWT_SECRET` is missing (guard in
-`backend/app/config.py`) — forgetting it fails loudly at boot, not silently.
+All four keys are required for a working deployment. The app refuses to
+start in production if `JWT_SECRET` is missing (guard in
+`backend/app/config.py`) — that one fails loudly at boot. A missing or
+invalid `ANTHROPIC_API_KEY` does NOT fail at boot (the app stays up by
+design; see `backend/app/llm.py`) — every generation just returns a calm
+error, which is why step 12's smoke test generates a real note.
 
 2. Secret name: **`ai-scribe/production`** (must match `AWS_SECRET_NAME` in
    the systemd unit). No rotation. Store.
 
-> Later phases add keys here (`ANTHROPIC_API_KEY`, `JWT_SECRET`) — same
-> secret, restart the service to pick them up.
+> Adding or rotating a key later: edit this same secret, then
+> `sudo systemctl restart ai-scribe` to pick it up (the secret is read once
+> at process start — a deliberate tradeoff, see `backend/app/config.py`).
 
 ## 4. IAM role for EC2 (console → IAM → Roles → Create role)
 
@@ -120,9 +126,10 @@ The app refuses to start in production if `JWT_SECRET` is missing (guard in
 ```bash
 ssh -i ~/ai-scribe.pem ubuntu@SCRIBE_HOST
 
-# Ubuntu 24.04 ships Python 3.12 — matches local dev exactly
+# Ubuntu 24.04 ships Python 3.12 — matches local dev exactly.
+# awscli is only used by step 12's RDS-privacy verification.
 sudo apt update && sudo apt install -y \
-  python3.12-venv nginx certbot python3-certbot-nginx git
+  python3.12-venv nginx certbot python3-certbot-nginx git awscli
 
 # Node 20 LTS (build-only; Node never runs in production)
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
@@ -161,6 +168,14 @@ AWS_SECRET_NAME=ai-scribe/production AWS_DEFAULT_REGION=REGION \
 # Demo data (idempotent — safe to re-run):
 AWS_SECRET_NAME=ai-scribe/production AWS_DEFAULT_REGION=REGION \
   .venv/bin/python -m app.seed
+
+# ICD-10 catalog (289 codes, idempotent). REQUIRED before the first
+# generation: both the candidate list injected into the note prompt and the
+# ICD search widget read this table — an empty catalog means notes without
+# codes and a search widget that never returns results, while /api/health
+# still reports everything green.
+AWS_SECRET_NAME=ai-scribe/production AWS_DEFAULT_REGION=REGION \
+  .venv/bin/python -m app.seed_icd
 ```
 
 ## 10. systemd service
@@ -202,6 +217,26 @@ From your **laptop browser**:
    ~4 seconds**. If they appear all at once, `proxy_buffering off` is not
    taking effect — re-check step 11.
 4. Repeat with DevTools → Network → throttling "Fast 3G": still progressive.
+5. **End-to-end scribe smoke test** — exercises the two things
+   `/api/health` cannot see: the `ANTHROPIC_API_KEY` in the secret and the
+   ICD catalog from step 9.
+   1. Sign in as `sarah.chen@clinic.example` (demo password: README →
+      "Seeded logins").
+   2. **New Encounter** → any new patient → paste a short clinical
+      transcript → **Generate note**. The four SOAP panes must fill
+      **progressively** (text arriving token by token, not one dump) and
+      ICD-10 chips must appear under the note.
+      - Calm "Generation failed" banner → `ANTHROPIC_API_KEY` missing or
+        invalid in the secret (fix, then `sudo systemctl restart ai-scribe`).
+      - Note generates but no ICD chips, and the search widget below finds
+        nothing → step 9's `app.seed_icd` was skipped.
+   3. Type `knee pain` into the ICD search widget — results must appear;
+      click one and confirm it lands in Assessment.
+   4. **Save note** → the header badge flips to `saved · v1` and the
+      version appears in the history panel (this row is now in RDS).
+   5. Click **● Start dictation** and grant microphone access — the control
+      must switch to "Listening…". Voice requires the HTTPS padlock from
+      item 1 (browsers refuse the mic on insecure origins) and Chrome/Edge.
 
 RDS privacy proof (walkthrough material):
 

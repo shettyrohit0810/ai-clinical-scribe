@@ -11,6 +11,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.audit import record_audit
@@ -242,6 +243,19 @@ def save_note(
         saved_by=user.id,
     )
     db.add(version)
+    try:
+        db.flush()
+    except IntegrityError:
+        # Two saves raced past the max(version_number) read above (rapid
+        # double-click, or the same note open in two tabs). The UNIQUE
+        # constraint already guaranteed history integrity; translate the
+        # collision into a clean conflict instead of a 500 — the winning
+        # save is intact and nothing was lost.
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="This note was just saved elsewhere — reload to see the latest version.",
+        )
     encounter.status = EncounterStatus.saved
     encounter.draft_note = None  # workspace scratch is now the saved record
     record_audit(

@@ -14,7 +14,9 @@ the feature actually works — not just that a button was clicked.
 
 - [ ] Backend running (`uvicorn app.main:app --port 8001`), frontend
       running (`npm run dev`), both against a freshly-seeded DB
-      (`python -m app.seed` — idempotent, safe to re-run).
+      (`python -m app.seed` **and** `python -m app.seed_icd` — both
+      idempotent, safe to re-run; without the second, notes generate with
+      no ICD codes and the search widget returns nothing).
 - [ ] **Chrome**, not another browser — dictation and voice editing need
       Web Speech API support (see README "Browser support").
 - [ ] Microphone permission will be prompted the first time you click

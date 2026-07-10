@@ -64,6 +64,50 @@ def test_saving_twice_yields_two_rows_and_v1_is_byte_identical(client, users):
     assert v2_reread["icd_codes"] == []
 
 
+def test_concurrent_double_save_conflict_is_409_not_500(client, users):
+    """A rapid double-save can race past the max(version_number) read: both
+    requests compute the same next version and the second insert violates
+    uq_note_version_per_encounter. Simulate the losing request by forcing its
+    max-read to return a stale 0 after v1 already exists — the route must
+    answer with a clean 409 (nothing lost, history intact), never a 500."""
+    enc_id = _create_and_login(client)
+    first = client.post(f"/api/encounters/{enc_id}/save", json={"subjective": "v1"})
+    assert first.status_code == 200
+
+    from app.db import SessionLocal, get_db
+    from app.main import app
+
+    def stale_max_db():
+        session = SessionLocal()
+        real_scalar = session.scalar
+
+        def scalar(statement, *args, **kwargs):
+            if "max(note_versions.version_number)" in str(statement).lower():
+                return 0  # what the losing racer read before the winner committed
+            return real_scalar(statement, *args, **kwargs)
+
+        session.scalar = scalar  # type: ignore[method-assign]
+        try:
+            yield session
+        finally:
+            session.close()
+
+    app.dependency_overrides[get_db] = stale_max_db
+    try:
+        duplicate = client.post(
+            f"/api/encounters/{enc_id}/save", json={"subjective": "duplicate"}
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert duplicate.status_code == 409
+
+    # The winning save is untouched and remains the only version.
+    listing = client.get(f"/api/encounters/{enc_id}/versions").json()
+    assert [v["version_number"] for v in listing] == [1]
+    assert client.get(f"/api/encounters/{enc_id}/versions/1").json()["subjective"] == "v1"
+
+
 def test_version_list_is_oldest_first_with_saver_name(client, users):
     enc_id = _create_and_login(client)
     client.post(f"/api/encounters/{enc_id}/save", json={"subjective": "s1"})
